@@ -77,51 +77,84 @@ elif authentication_status:
     # Load data from Google Sheets
     try:
         data = conn.read(worksheet="Portfolios", ttl="0") # ttl=0 for fresh data
+        
+        # Ensure 'portfolio_name' column exists (migration)
+        if not data.empty and 'portfolio_name' not in data.columns:
+            data['portfolio_name'] = 'Default'
+        
         # Ensure correct types
         if not data.empty:
+            # Add missing columns if any
+            for col in ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']:
+                if col not in data.columns:
+                    data[col] = pd.NA
+
             data = data.astype({
                 'username': 'str',
                 'stock_name': 'str', 
                 'current_value': 'float',
-                'target_allocation': 'float'
+                'target_allocation': 'float',
+                'portfolio_name': 'str'
             })
+            # Fill NaNs
+            data['portfolio_name'] = data['portfolio_name'].replace('nan', 'Default').fillna('Default')
+            
     except Exception:
         # If sheet is empty or fails, create empty dataframe
-        data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation'])
+        data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name'])
 
     # Filter for current user
-    user_stocks_df = data[data['username'] == username]
-
-    # If user has no data, initialize with defaults AND save to sheet immediately to bootstrap
-    if user_stocks_df.empty:
-        default_stocks = [
-            {"username": username, "stock_name": "Stock A", "current_value": 1000.0, "target_allocation": 30.0},
-            {"username": username, "stock_name": "Stock B", "current_value": 1500.0, "target_allocation": 40.0},
-            {"username": username, "stock_name": "Stock C", "current_value": 500.0, "target_allocation": 30.0},
-        ]
-        new_rows = pd.DataFrame(default_stocks)
-        data = pd.concat([data, new_rows], ignore_index=True)
-        conn.update(worksheet="Portfolios", data=data)
-        st.toast("Initialized default portfolio!", icon="🌱")
-        user_stocks_df = new_rows # Update local view
-
-    # Convert to list of dicts for session state logic interaction (preserving existing UI logic)
-    # We map 'stock_name' back to 'name' for the UI
-    current_stocks = []
-    for _, row in user_stocks_df.iterrows():
-        current_stocks.append({
-            "name": row['stock_name'],
-            "current_value": row['current_value'],
-            "target_allocation": row['target_allocation']
-        })
+    user_all_data = data[data['username'] == username]
     
-    # We use session state as a temporary buffer for edits, but we overwrite it with DB data on load
-    st.session_state.stocks = current_stocks
-
-    # Sidebar for configuration
+    # --- Sidebar UI ---
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        # 1. Portfolios Section
+        st.header("📂 Portfolios")
         
+        # Determine existing portfolios
+        if not user_all_data.empty:
+            existing_portfolios = sorted(user_all_data['portfolio_name'].unique().tolist())
+        else:
+            existing_portfolios = []
+        
+        if "Default" not in existing_portfolios:
+            existing_portfolios.insert(0, "Default")
+            
+        # Handle auto-selection after creation
+        default_index = 0
+        if 'new_portfolio_created' in st.session_state:
+            target_new = st.session_state.new_portfolio_created
+            if target_new in existing_portfolios:
+                default_index = existing_portfolios.index(target_new)
+            del st.session_state.new_portfolio_created
+            
+        # Selection Dropdown
+        selected_portfolio = st.selectbox("Select Portfolio", existing_portfolios, index=default_index, key="portfolio_selector")
+        
+        # Create New Portfolio
+        with st.expander("Create New Portfolio"):
+            new_portfolio_input = st.text_input("Name", placeholder="e.g., Retirement")
+            if st.button("Create"):
+                if new_portfolio_input and new_portfolio_input not in existing_portfolios:
+                    # Create a placeholder row to persist the portfolio name
+                    new_row = pd.DataFrame([{
+                        "username": username,
+                        "portfolio_name": new_portfolio_input,
+                        "stock_name": "__PLACEHOLDER__",
+                        "current_value": 0.0,
+                        "target_allocation": 0.0
+                    }])
+                    updated_data = pd.concat([data, new_row], ignore_index=True)
+                    conn.update(worksheet="Portfolios", data=updated_data)
+                    
+                    st.session_state.new_portfolio_created = new_portfolio_input
+                    st.success(f"Created '{new_portfolio_input}'!")
+                    st.rerun()
+
+        st.divider()
+
+        # 2. Configuration Section
+        st.header("⚙️ Configuration")
         monthly_investment = st.number_input(
             "Monthly Investment Amount ($)",
             min_value=0.0,
@@ -130,10 +163,10 @@ elif authentication_status:
             help="Amount you want to invest this month"
         )
         
-        st.markdown("---")
-        st.subheader("Manage Stocks")
-        
-        # Add new stock
+        st.divider()
+
+        # 3. Add Stock Section
+        st.header("Manage Stocks")
         with st.expander("➕ Add New Stock"):
             new_name = st.text_input("Stock Name")
             new_value = st.number_input("Current Value ($)", min_value=0.0, value=0.0, key="new_value")
@@ -141,13 +174,31 @@ elif authentication_status:
             
             if st.button("Add Stock"):
                 if new_name:
+                    # null checks or cleaning logic could go here
+                    
                     # Add to master dataframe
+                    # If this is the first real stock, we can optionally remove the placeholder if it exists,
+                    # but keeping it is harmless if we always filter it out. 
+                    # Actually, let's remove it to keep sheet clean.
+                    
+                    # Create new row
                     new_row = pd.DataFrame([{
                         "username": username,
                         "stock_name": new_name,
                         "current_value": new_value,
-                        "target_allocation": new_target
+                        "target_allocation": new_target,
+                        "portfolio_name": selected_portfolio
                     }])
+                    
+                    # Remove placeholder if it exists for this portfolio
+                    # (Logic: drop rows where portfolio=current AND name=__PLACEHOLDER__)
+                    mask_placeholder = (data['username'] == username) & \
+                                     (data['portfolio_name'] == selected_portfolio) & \
+                                     (data['stock_name'] == "__PLACEHOLDER__")
+                    
+                    if mask_placeholder.any():
+                        data = data[~mask_placeholder]
+
                     updated_data = pd.concat([data, new_row], ignore_index=True)
                     conn.update(worksheet="Portfolios", data=updated_data)
                     st.success(f"Added {new_name}")
@@ -155,11 +206,49 @@ elif authentication_status:
                 else:
                     st.error("Please enter a stock name")
 
+
+    # --- Data Logic (Filtering & State) ---
+    # Filter data for SELECTED portfolio
+    user_portfolio_df = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]
+    
+    # Filter out placeholders
+    user_portfolio_df = user_portfolio_df[user_portfolio_df['stock_name'] != "__PLACEHOLDER__"]
+
+    # If user has no data in Default portfolio, initialize defaults
+    # (Check against raw data including placeholders to avoid re-initializing if user just deleted all real stocks)
+    has_any_data_in_portfolio = not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty
+    
+    if selected_portfolio == "Default" and not has_any_data_in_portfolio and user_all_data[user_all_data['portfolio_name'] != "Default"].empty:
+        default_stocks = [
+            {"username": username, "portfolio_name": "Default", "stock_name": "Stock A", "current_value": 1000.0, "target_allocation": 30.0},
+            {"username": username, "portfolio_name": "Default", "stock_name": "Stock B", "current_value": 1500.0, "target_allocation": 40.0},
+            {"username": username, "portfolio_name": "Default", "stock_name": "Stock C", "current_value": 500.0, "target_allocation": 30.0},
+        ]
+        new_rows = pd.DataFrame(default_stocks)
+        data = pd.concat([data, new_rows], ignore_index=True)
+        conn.update(worksheet="Portfolios", data=data)
+        st.toast("Initialized default portfolio!", icon="🌱")
+        user_portfolio_df = new_rows # Update local view
+
+    # Convert to list of dicts for session state logic interaction
+    current_stocks = []
+    for _, row in user_portfolio_df.iterrows():
+        current_stocks.append({
+            "name": row['stock_name'],
+            "current_value": row['current_value'],
+            "target_allocation": row['target_allocation']
+        })
+    
+    st.session_state.stocks = current_stocks
+
     # Main content
     col1, col2 = st.columns([2, 1])
 
     with col1:
         st.subheader("📊 Current Portfolio")
+        
+        if not st.session_state.stocks:
+            st.info("This portfolio is empty. Add stocks using the sidebar!", icon="👈")
         
         # Display and edit stocks
         stocks_to_remove = []
@@ -171,14 +260,14 @@ elif authentication_status:
             with st.container():
                 cols = st.columns([3, 2, 2, 1])
                 
-                # We simply use the UI to gather new values
-                # Then we perform a bulk update logic if changed
+                # Namespaced keys to prevent state collision between portfolios
+                key_prefix = f"{selected_portfolio}_{idx}"
                 
                 with cols[0]:
                     new_name_val = st.text_input(
                         "Name",
                         value=stock['name'],
-                        key=f"name_{idx}",
+                        key=f"{key_prefix}_name",
                         label_visibility="collapsed"
                     )
                 
@@ -188,7 +277,7 @@ elif authentication_status:
                         min_value=0.0,
                         value=float(stock['current_value']),
                         step=100.0,
-                        key=f"value_{idx}",
+                        key=f"{key_prefix}_value",
                         label_visibility="collapsed"
                     )
                 
@@ -199,37 +288,50 @@ elif authentication_status:
                         max_value=100.0,
                         value=float(stock['target_allocation']),
                         step=1.0,
-                        key=f"target_{idx}",
+                        key=f"{key_prefix}_target",
                         label_visibility="collapsed"
                     )
                 
                 # Check for changes & Save immediately
-                # This is a bit inefficient (one write per change) but simpler for Streamlit mechanics
-                # Identifying the row: We assume (username, stock_name) is unique-ish for simplicity, 
-                # but relying on `idx` relative to the filtered dataframe is safer if order is preserved.
-                
-                # Logic: If values changed from what is in `stock`, update DB
                 if (new_name_val != stock['name'] or 
                     abs(new_val_val - stock['current_value']) > 0.01 or 
                     abs(new_target_val - stock['target_allocation']) > 0.01):
                     
                     # Update the specific row in the main `data` dataframe
-                    # Find the row index in the FILTERED dataframe
-                    filtered_idx = user_stocks_df.index[idx]
+                    # Find the row index in the FILTERED dataframe (user_portfolio_df)
+                    filtered_idx = user_portfolio_df.index[idx]
                     
                     data.at[filtered_idx, 'stock_name'] = new_name_val
                     data.at[filtered_idx, 'current_value'] = new_val_val
                     data.at[filtered_idx, 'target_allocation'] = new_target_val
                     
                     conn.update(worksheet="Portfolios", data=data)
-                    # No rerun needed here, the loop continues, but the validation logic below will catch it
-                    # actually st.rerun() is safer to refresh the view
                     st.rerun()
 
                 with cols[3]:
-                    if st.button("🗑️", key=f"remove_{idx}"):
-                        filtered_idx = user_stocks_df.index[idx]
+                    if st.button("🗑️", key=f"{key_prefix}_remove"):
+                        filtered_idx = user_portfolio_df.index[idx]
                         data = data.drop(filtered_idx)
+                        
+                        # If this was the last stock, maybe we should add a placeholder to keep the portfolio alive?
+                        # But for now, let's allow "empty" portfolios to exist in UI only until reload?
+                        # No, if we delete the last row, the portfolio name disappears from DB.
+                        # We should add a placeholder if empty.
+                        
+                        # Check if this deletion makes the portfolio empty
+                        remaining_in_portfolio = user_portfolio_df.drop(filtered_idx)
+                        if remaining_in_portfolio.empty:
+                             placeholder_row = pd.DataFrame([{
+                                "username": username,
+                                "portfolio_name": selected_portfolio,
+                                "stock_name": "__PLACEHOLDER__",
+                                "current_value": 0.0,
+                                "target_allocation": 0.0
+                            }])
+                             data = pd.concat([data.drop(filtered_idx), placeholder_row], ignore_index=True)
+                        else:
+                             data = data.drop(filtered_idx)
+
                         conn.update(worksheet="Portfolios", data=data)
                         st.rerun()
     
