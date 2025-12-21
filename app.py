@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import streamlit_authenticator as stauth
 import yaml
 from yaml.loader import SafeLoader
@@ -268,7 +269,13 @@ elif authentication_status:
         
         # We iterate over the LIST (st.session_state.stocks) which reflects current DB state
         # But for edits, we need to identify the exact row in the original dataframe to update
-        
+        # Headers
+        with st.container():
+            cols = st.columns([3, 2, 2, 1])
+            cols[0].markdown("**Ticker**")
+            cols[1].markdown("**Current Value (€)**")
+            cols[2].markdown("**Target %**")
+
         for idx, stock in enumerate(st.session_state.stocks):
             with st.container():
                 cols = st.columns([3, 2, 2, 1])
@@ -525,10 +532,16 @@ elif authentication_status:
                 fig1 = go.Figure(data=[go.Pie(
                     labels=df['Stock'],
                     values=df['Current Value'],
-                    title="Current Allocation",
-                    hole=0.3
+                    hole=0.3,
+                    textfont=dict(size=18),
+                    marker=dict(colors=px.colors.qualitative.D3)
                 )])
-                fig1.update_layout(height=300)
+                fig1.update_layout(
+                    height=450,
+                    title_text="Current Allocation",
+                    title_font_size=24,
+                    legend=dict(font=dict(size=16))
+                )
                 st.plotly_chart(fig1, width="stretch")
             
             with col_chart2:
@@ -536,10 +549,16 @@ elif authentication_status:
                 fig2 = go.Figure(data=[go.Pie(
                     labels=df['Stock'],
                     values=df['New Value'],
-                    title="After Investment",
-                    hole=0.3
+                    hole=0.3,
+                    textfont=dict(size=18),
+                    marker=dict(colors=px.colors.qualitative.D3)
                 )])
-                fig2.update_layout(height=300)
+                fig2.update_layout(
+                    height=450,
+                    title_text="After Investment",
+                    title_font_size=24,
+                    legend=dict(font=dict(size=16))
+                )
                 st.plotly_chart(fig2, width="stretch")
 
     # Footer
