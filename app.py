@@ -169,7 +169,7 @@ elif authentication_status:
         # 2. Configuration Section
         st.header("⚙️ Configuration")
         monthly_investment = st.number_input(
-            "Monthly Investment Amount ($)",
+            "Monthly Investment Amount (€)",
             min_value=0.0,
             value=1000.0,
             step=100.0,
@@ -182,7 +182,7 @@ elif authentication_status:
         st.header("Manage Stocks")
         with st.expander("➕ Add New Stock"):
             new_name = st.text_input("Stock Name")
-            new_value = st.number_input("Current Value ($)", min_value=0.0, value=0.0, key="new_value")
+            new_value = st.number_input("Current Value (€)", min_value=0.0, value=0.0, key="new_value")
             new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
             
             if st.button("Add Stock"):
@@ -356,14 +356,14 @@ elif authentication_status:
         total_current = sum(s['current_value'] for s in st.session_state.stocks)
         total_target = sum(s['target_allocation'] for s in st.session_state.stocks)
         
-        st.metric("Total Portfolio Value", f"${total_current:,.2f}")
+        st.metric("Total Portfolio Value", f"€{total_current:,.2f}")
         st.metric("Total Target Allocation", f"{total_target:.1f}%")
         
         if abs(total_target - 100.0) > 0.01:
             st.warning(f"⚠️ Target allocations should sum to 100%")
 
     # Calculate allocations
-    if st.button("🧮 Calculate Investment Allocation", type="primary", use_container_width=True):
+    if st.button("🧮 Calculate Investment Allocation", type="primary", width="stretch"):
         if abs(sum(s['target_allocation'] for s in st.session_state.stocks) - 100.0) > 0.01:
             st.error("Please ensure target allocations sum to 100%")
         else:
@@ -397,15 +397,15 @@ elif authentication_status:
             # Display results table
             st.dataframe(
                 df.style.format({
-                    "Current Value": "${:,.2f}",
+                    "Current Value": "€{:,.2f}",
                     "Current %": "{:.2f}%",
                     "Target %": "{:.2f}%",
-                    "Target Value": "${:,.2f}",
-                    "Investment": "${:,.2f}",
-                    "New Value": "${:,.2f}",
+                    "Target Value": "€{:,.2f}",
+                    "Investment": "€{:,.2f}",
+                    "New Value": "€{:,.2f}",
                     "New %": "{:.2f}%"
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
             
@@ -414,15 +414,15 @@ elif authentication_status:
             
             col_a, col_b, col_c = st.columns(3)
             with col_a:
-                st.metric("Total Investment", f"${total_investment:,.2f}")
+                st.metric("Total Investment", f"€{total_investment:,.2f}")
             with col_b:
-                st.metric("Available to Invest", f"${monthly_investment:,.2f}")
+                st.metric("Available to Invest", f"€{monthly_investment:,.2f}")
             with col_c:
                 remaining = monthly_investment - total_investment
-                st.metric("Remaining/Excess", f"${remaining:,.2f}", delta=f"{remaining:,.2f}")
+                st.metric("Remaining/Excess", f"€{remaining:,.2f}", delta=f"{remaining:,.2f}")
             
             if total_investment > monthly_investment:
-                st.warning(f"⚠️ Calculated investment (${total_investment:,.2f}) exceeds available amount (${monthly_investment:,.2f}). Consider adjusting your targets or increasing investment amount.")
+                st.warning(f"⚠️ Calculated investment (€{total_investment:,.2f}) exceeds available amount (€{monthly_investment:,.2f}). Consider adjusting your targets or increasing investment amount.")
             
             # Visualization
             st.markdown("---")
@@ -439,7 +439,7 @@ elif authentication_status:
                     hole=0.3
                 )])
                 fig1.update_layout(height=300)
-                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig1, width="stretch")
             
             with col_chart2:
                 # New allocation pie chart
@@ -450,7 +450,7 @@ elif authentication_status:
                     hole=0.3
                 )])
                 fig2.update_layout(height=300)
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width="stretch")
 
     # Footer
     st.markdown("---")
