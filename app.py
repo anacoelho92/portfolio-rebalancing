@@ -324,12 +324,6 @@ elif authentication_status:
                 with cols[3]:
                     if st.button("🗑️", key=f"{key_prefix}_remove"):
                         filtered_idx = user_portfolio_df.index[idx]
-                        data = data.drop(filtered_idx)
-                        
-                        # If this was the last stock, maybe we should add a placeholder to keep the portfolio alive?
-                        # But for now, let's allow "empty" portfolios to exist in UI only until reload?
-                        # No, if we delete the last row, the portfolio name disappears from DB.
-                        # We should add a placeholder if empty.
                         
                         # Check if this deletion makes the portfolio empty
                         remaining_in_portfolio = user_portfolio_df.drop(filtered_idx)
@@ -341,6 +335,8 @@ elif authentication_status:
                                 "current_value": 0.0,
                                 "target_allocation": 0.0
                             }])
+                             # Note: We must drop from the ORIGINAL data here, not the already-dropped one if we had dropped earlier.
+                             # But now we only drop here.
                              data = pd.concat([data.drop(filtered_idx), placeholder_row], ignore_index=True)
                         else:
                              data = data.drop(filtered_idx)
