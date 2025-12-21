@@ -19,4 +19,4 @@ EXPOSE 8501
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 # Run the application
-CMD sh -c 'mkdir -p .streamlit && echo "$SECRETS_TOML" > .streamlit/secrets.toml && streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0'
+CMD sh -c 'python init_secrets.py && streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0'
