@@ -79,17 +79,27 @@ elif authentication_status:
     try:
         data = conn.read(worksheet="Portfolios", ttl="0") # ttl=0 for fresh data
         
+        # Ensure data is a DataFrame (read can sometimes return unexpected types if empty)
+        if data is None:
+            data = pd.DataFrame()
+            
         # Ensure 'portfolio_name' column exists (migration)
         if not data.empty and 'portfolio_name' not in data.columns:
             data['portfolio_name'] = 'Default'
         
-        # Ensure correct types
-        if not data.empty:
-            # Add missing columns if any
-            for col in ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']:
+        # Ensure consistency by defining all required columns
+        required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']
+        
+        # If empty or missing crucial columns, enforce structure
+        if data.empty:
+            data = pd.DataFrame(columns=required_columns)
+        else:
+            # Add any missing columns with NA
+            for col in required_columns:
                 if col not in data.columns:
                     data[col] = pd.NA
-
+                    
+            # Ensure correct types
             data = data.astype({
                 'username': 'str',
                 'stock_name': 'str', 
@@ -97,11 +107,14 @@ elif authentication_status:
                 'target_allocation': 'float',
                 'portfolio_name': 'str'
             })
-            # Fill NaNs
-            data['portfolio_name'] = data['portfolio_name'].replace('nan', 'Default').fillna('Default')
             
-    except Exception:
-        # If sheet is empty or fails, create empty dataframe
+            # Fill NaNs specifically for key grouping columns to allow filtering
+            data['portfolio_name'] = data['portfolio_name'].fillna('Default')
+            data['username'] = data['username'].fillna('unknown') 
+
+    except Exception as e:
+        # Fallback if connection fails entirely
+        # st.error(f"Error loading data: {e}") # Optional: show error to user?
         data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name'])
 
     # Filter for current user
