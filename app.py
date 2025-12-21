@@ -180,6 +180,17 @@ elif authentication_status:
 
         st.divider()
 
+        # --- Data Logic Moved Up for Sidebar access ---
+        # Filter data for SELECTED portfolio
+        user_portfolio_df = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]
+        # Filter out placeholders
+        user_portfolio_df = user_portfolio_df[user_portfolio_df['stock_name'] != "__PLACEHOLDER__"]
+
+        # Ensure session state for manual targets exists
+        if 'saved_manual_targets' not in st.session_state:
+            st.session_state['saved_manual_targets'] = {}
+
+
         # 2. Configuration Section
         st.header("⚙️ Configuration")
         monthly_investment = st.number_input(
@@ -189,6 +200,84 @@ elif authentication_status:
             step=100.0,
             help="Amount you want to invest this month"
         )
+        
+        # Market Indicators
+        st.markdown("### Market Indicators")
+        use_market_indicators = st.checkbox("Use Market Indicators", value=False, help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio")
+        
+        if use_market_indicators:
+            buffett_index = st.number_input("Buffett Indicator (%)", value=223.73, step=0.1, help="Market Cap to GDP")
+            cape_ratio = st.number_input("CAPE Ratio", value=39.42, step=0.1, help="Shiller PE Ratio")
+            
+            # Logic for Market Phases
+            # Rules:
+            # 1. Aggressive: Buffett <= 150 AND CAPE < 20 -> 70-10-20
+            # 2. Normal: Buffett 150-190 AND CAPE 20-28 -> 60-20-20
+            # 3. Pre-Defensive: Buffett 190-210 AND CAPE 28-35 -> 50-30-20
+            # 4. Defensive: Buffett >= 210 AND CAPE >= 35 -> 40-40-20
+            # Fallback/Between: Use Defensive (conservative) or interpolate? User rules seem to cover ranges but might be gaps.
+            # Assuming strictly the "highest" risk category that matches, or defaulting to defensive if high.
+            
+            target_ratios = [40, 40, 20] # Default Defensive
+            phase_name = "Unknown/Defensive"
+            
+            if buffett_index <= 150 and cape_ratio < 20:
+                target_ratios = [70, 10, 20]
+                phase_name = "Aggressive 🚀"
+            elif (150 < buffett_index <= 190) and (20 <= cape_ratio < 28):
+                target_ratios = [60, 20, 20]
+                phase_name = "Normal ⚖️"
+            elif (190 < buffett_index <= 210) and (28 <= cape_ratio < 35):
+                target_ratios = [50, 30, 20]
+                phase_name = "Pre-Defensive 🛡️"
+            elif buffett_index >= 210 and cape_ratio >= 35:
+                target_ratios = [40, 40, 20]
+                phase_name = "Defensive 🏰"
+            else:
+                 # Logic for gaps/mismatches: Maintain current allocation (fallback to saved manual)
+                 target_ratios = None
+                 phase_name = "Mixed Signals (Hold Current) 🤷"
+
+            if target_ratios:
+                st.info(f"Current Regime: **{phase_name}** | Applying Targets: {target_ratios}")
+                
+                # Apply to first 3 stocks
+                if len(st.session_state.stocks) >= 3:
+                     # Update list and widget state
+                    for i in range(3):
+                        new_alloc = float(target_ratios[i])
+                        st.session_state.stocks[i]['target_allocation'] = new_alloc
+                        widget_key = f"{selected_portfolio}_{i}_target"
+                        st.session_state[widget_key] = new_alloc
+                else:
+                    st.warning("⚠️ Need at least 3 stocks to apply Market Indicator rules.")
+            else:
+                st.warning(f"Indicators are mixed ({phase_name}). Reverting/Holding manual target allocations.")
+                # Restore manual targets if available
+                if st.session_state.saved_manual_targets.get(selected_portfolio):
+                     manual_map = st.session_state.saved_manual_targets[selected_portfolio]
+                     
+                     if len(st.session_state.stocks) >= 3:
+                         for i in range(3):
+                             s_name = st.session_state.stocks[i]['name']
+                             if s_name in manual_map:
+                                 restored_val = manual_map[s_name]
+                                 st.session_state.stocks[i]['target_allocation'] = restored_val
+                                 widget_key = f"{selected_portfolio}_{i}_target"
+                                 st.session_state[widget_key] = restored_val
+        else:
+             buffett_index = 223.73
+             cape_ratio = 39.42
+             
+             # Save Manual Targets when Strategy is OFF
+             # We use the current loaded data to snapshot the user's manual settings
+             # We do this every run while strategy is off
+             
+             current_targets_map = {}
+             for _, row in user_portfolio_df.iterrows():
+                 current_targets_map[row['stock_name']] = float(row['target_allocation'])
+             
+             st.session_state.saved_manual_targets[selected_portfolio] = current_targets_map
         
         st.divider()
 
@@ -234,13 +323,10 @@ elif authentication_status:
                     st.error("Please enter a stock name")
 
 
-    # --- Data Logic (Filtering & State) ---
-    # Filter data for SELECTED portfolio
-    user_portfolio_df = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]
+    # --- Data Logic (Moved Up) ---
+    # The filtering logic was moved up to effectively support sidebar logic.
+    # We keep the default initialization logic here if needed, or check if we need to re-run it.
     
-    # Filter out placeholders
-    user_portfolio_df = user_portfolio_df[user_portfolio_df['stock_name'] != "__PLACEHOLDER__"]
-
     # If user has no data in Default portfolio, initialize defaults
     # (Check against raw data including placeholders to avoid re-initializing if user just deleted all real stocks)
     has_any_data_in_portfolio = not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty
