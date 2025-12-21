@@ -370,28 +370,122 @@ elif authentication_status:
             st.markdown("---")
             st.subheader("💡 Investment Recommendations")
             
-            # Calculate new portfolio value after investment
-            new_total = total_current + monthly_investment
+            # --- Advanced Rebalancing Logic (Future Target Approach) ---
+            # 1. Rules: No Sell, Integer Investment
+            # 2. Strategy: Aim for Target Allocation of the *Future* Total Portfolio Value.
+            #    This ensures "distribute to all" behavior when cash is added, while still correcting imbalances.
             
-            # Calculate target values
-            results = []
+            total_current = sum(s['current_value'] for s in st.session_state.stocks)
+            new_total_theoretical = total_current + monthly_investment
+            
+            # Calculate the "Ideal" ending value for each stock
+            # and the "Gap" (how much we need to buy to reach it)
+            allocations_raw = {}
+            total_gap = 0.0
+            
+            stock_gaps = []
+            
             for stock in st.session_state.stocks:
-                target_value = new_total * (stock['target_allocation'] / 100)
-                investment_needed = target_value - stock['current_value']
-                current_allocation = (stock['current_value'] / total_current * 100) if total_current > 0 else 0
-                new_allocation = (target_value / new_total * 100) if new_total > 0 else 0
+                ideal_value = new_total_theoretical * (stock['target_allocation'] / 100.0)
+                gap = ideal_value - stock['current_value']
+                
+                # Enforce No Sell (negative gap becomes 0)
+                if gap < 0:
+                    gap = 0.0
+                
+                stock_gaps.append({
+                    "name": stock['name'],
+                    "gap": gap,
+                    "target": stock['target_allocation']
+                })
+                total_gap += gap
+
+            # Distribute Investment
+            allocations = {}
+            
+            if total_gap > 0:
+                # We have gaps to fill. Distribute proportional to the gap.
+                # If Total Gap > Monthly Investment (e.g. huge underweights), this partially fills them.
+                # If Total Gap < Monthly Investment (e.g. we have extra cash), this logic needs adjustment?
+                # Actually, "Ideal Value" was calculated based on (Current + Inv), so 
+                # Sum(Ideal) = Current + Inv.
+                # Sum(Gap) = Sum(Ideal) - Sum(Current) = Inv.
+                # So mathematically, Total Gap should exactly equal Monthly Investment 
+                # (unless some gaps were negative/no-sell, then Total Gap < Monthly Inv).
+                
+                # Case 1: No Sells needed. Total Gap == Monthly Inv. 
+                # Allocation is exactly the gap.
+                
+                # Case 2: Some Sells "ignored" (Gap set to 0). Total Gap > Monthly Inv? 
+                # No. Ideal = 1440. Current = 440. Sum(Ideal - Current) = 1000.
+                # If we clamp negatives to 0, Sum(Gap) will be GREATER than 1000?
+                # Example: A=1000(Ideal 720), B=200(Ideal 720). Inv=240. Future=1440.
+                # Gap A = -280 -> 0. Gap B = 520. 
+                # Total Gap = 520. We have only 240.
+                # So we distribute 240 proportional to the positive gaps.
+                
+                for s in stock_gaps:
+                    if total_gap > 0:
+                        allocations[s['name']] = (s['gap'] / total_gap) * monthly_investment
+                    else:
+                        allocations[s['name']] = 0
+            else:
+                # Fallback (e.g. everything was perfect or confusing state): Distribute by target
+                for stock in st.session_state.stocks:
+                    allocations[stock['name']] = monthly_investment * (stock['target_allocation'] / 100.0)
+
+            # --- Integer Constraint Logic ---
+            # 1. Floor all allocations
+            integer_allocations = {k: int(v) for k, v in allocations.items()}
+            
+            # 2. Calculate remainder
+            current_sum = sum(integer_allocations.values())
+            remainder = int(monthly_investment - current_sum)
+            
+            # 3. Distribute remainder to stocks with highest fractional parts
+            if remainder > 0:
+                # Calculate fractional parts
+                fractionals = []
+                for k, v in allocations.items():
+                    frac = v - int(v)
+                    fractionals.append((k, frac))
+                
+                # Sort by fractional part descending
+                fractionals.sort(key=lambda x: x[1], reverse=True)
+                
+                # Distribute 1 by 1
+                for i in range(remainder):
+                    idx = i % len(fractionals)
+                    stock_name = fractionals[idx][0]
+                    integer_allocations[stock_name] += 1
+            
+            # Prepare results table
+            results = []
+            final_actual_new_total = total_current + monthly_investment
+            
+            for stock in st.session_state.stocks:
+                inv_amount = integer_allocations[stock['name']]
+                
+                current_alloc = (stock['current_value'] / total_current * 100) if total_current > 0 else 0
+                
+                # Calculate new state
+                new_val = stock['current_value'] + inv_amount
+                new_alloc = (new_val / final_actual_new_total * 100) if final_actual_new_total > 0 else 0
+                
+                target_val_approx = final_actual_new_total * (stock['target_allocation'] / 100)
                 
                 results.append({
                     "Stock": stock['name'],
                     "Current Value": stock['current_value'],
-                    "Current %": current_allocation,
+                    "Current %": current_alloc,
                     "Target %": stock['target_allocation'],
-                    "Target Value": target_value,
-                    "Investment": max(0, investment_needed),  # Don't show negative investments
-                    "New Value": stock['current_value'] + max(0, investment_needed),
-                    "New %": new_allocation
+                    "Target Value": target_val_approx,
+                    "Investment": inv_amount,
+                    "New Value": new_val,
+                    "New %": new_alloc
                 })
             
+            # Convert to DataFrame
             df = pd.DataFrame(results)
             
             # Display results table
