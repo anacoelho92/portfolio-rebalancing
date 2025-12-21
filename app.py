@@ -151,6 +151,19 @@ elif authentication_status:
                     st.success(f"Created '{new_portfolio_input}'!")
                     st.rerun()
 
+        # Delete Portfolio (only for non-Default)
+        if selected_portfolio != "Default":
+            st.markdown("---")
+            with st.expander(f"⚠️ Delete '{selected_portfolio}'"):
+                st.warning("This action cannot be undone.")
+                if st.button("Confirm Delete", type="primary", key="delete_portfolio_btn"):
+                    # Remove all rows belonging to this portfolio
+                    mask_to_delete = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                    data = data[~mask_to_delete]
+                    conn.update(worksheet="Portfolios", data=data)
+                    st.toast(f"Deleted portfolio: {selected_portfolio}")
+                    st.rerun()
+
         st.divider()
 
         # 2. Configuration Section
