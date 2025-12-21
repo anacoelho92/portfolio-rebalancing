@@ -70,13 +70,53 @@ elif authentication_status:
     st.title("💰 Portfolio Allocation Calculator")
     st.markdown("Calculate optimal investment amounts to rebalance your portfolio")
 
-    # Initialize session state for stocks
-    if 'stocks' not in st.session_state:
-        st.session_state.stocks = [
-            {"name": "Stock A", "current_value": 1000.0, "target_allocation": 30.0},
-            {"name": "Stock B", "current_value": 1500.0, "target_allocation": 40.0},
-            {"name": "Stock C", "current_value": 500.0, "target_allocation": 30.0},
+    # Initialize GSheets connection
+    from streamlit_gsheets import GSheetsConnection
+    conn = st.connection("gsheets", type=GSheetsConnection)
+
+    # Load data from Google Sheets
+    try:
+        data = conn.read(worksheet="Portfolios", ttl="0") # ttl=0 for fresh data
+        # Ensure correct types
+        if not data.empty:
+            data = data.astype({
+                'username': 'str',
+                'stock_name': 'str', 
+                'current_value': 'float',
+                'target_allocation': 'float'
+            })
+    except Exception:
+        # If sheet is empty or fails, create empty dataframe
+        data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation'])
+
+    # Filter for current user
+    user_stocks_df = data[data['username'] == username]
+
+    # If user has no data, initialize with defaults AND save to sheet immediately to bootstrap
+    if user_stocks_df.empty:
+        default_stocks = [
+            {"username": username, "stock_name": "Stock A", "current_value": 1000.0, "target_allocation": 30.0},
+            {"username": username, "stock_name": "Stock B", "current_value": 1500.0, "target_allocation": 40.0},
+            {"username": username, "stock_name": "Stock C", "current_value": 500.0, "target_allocation": 30.0},
         ]
+        new_rows = pd.DataFrame(default_stocks)
+        data = pd.concat([data, new_rows], ignore_index=True)
+        conn.update(worksheet="Portfolios", data=data)
+        st.toast("Initialized default portfolio!", icon="🌱")
+        user_stocks_df = new_rows # Update local view
+
+    # Convert to list of dicts for session state logic interaction (preserving existing UI logic)
+    # We map 'stock_name' back to 'name' for the UI
+    current_stocks = []
+    for _, row in user_stocks_df.iterrows():
+        current_stocks.append({
+            "name": row['stock_name'],
+            "current_value": row['current_value'],
+            "target_allocation": row['target_allocation']
+        })
+    
+    # We use session state as a temporary buffer for edits, but we overwrite it with DB data on load
+    st.session_state.stocks = current_stocks
 
     # Sidebar for configuration
     with st.sidebar:
@@ -101,11 +141,15 @@ elif authentication_status:
             
             if st.button("Add Stock"):
                 if new_name:
-                    st.session_state.stocks.append({
-                        "name": new_name,
+                    # Add to master dataframe
+                    new_row = pd.DataFrame([{
+                        "username": username,
+                        "stock_name": new_name,
                         "current_value": new_value,
                         "target_allocation": new_target
-                    })
+                    }])
+                    updated_data = pd.concat([data, new_row], ignore_index=True)
+                    conn.update(worksheet="Portfolios", data=updated_data)
                     st.success(f"Added {new_name}")
                     st.rerun()
                 else:
@@ -120,12 +164,18 @@ elif authentication_status:
         # Display and edit stocks
         stocks_to_remove = []
         
+        # We iterate over the LIST (st.session_state.stocks) which reflects current DB state
+        # But for edits, we need to identify the exact row in the original dataframe to update
+        
         for idx, stock in enumerate(st.session_state.stocks):
             with st.container():
                 cols = st.columns([3, 2, 2, 1])
                 
+                # We simply use the UI to gather new values
+                # Then we perform a bulk update logic if changed
+                
                 with cols[0]:
-                    stock['name'] = st.text_input(
+                    new_name_val = st.text_input(
                         "Name",
                         value=stock['name'],
                         key=f"name_{idx}",
@@ -133,7 +183,7 @@ elif authentication_status:
                     )
                 
                 with cols[1]:
-                    stock['current_value'] = st.number_input(
+                    new_val_val = st.number_input(
                         "Current Value",
                         min_value=0.0,
                         value=float(stock['current_value']),
@@ -143,7 +193,7 @@ elif authentication_status:
                     )
                 
                 with cols[2]:
-                    stock['target_allocation'] = st.number_input(
+                    new_target_val = st.number_input(
                         "Target %",
                         min_value=0.0,
                         max_value=100.0,
@@ -153,16 +203,37 @@ elif authentication_status:
                         label_visibility="collapsed"
                     )
                 
+                # Check for changes & Save immediately
+                # This is a bit inefficient (one write per change) but simpler for Streamlit mechanics
+                # Identifying the row: We assume (username, stock_name) is unique-ish for simplicity, 
+                # but relying on `idx` relative to the filtered dataframe is safer if order is preserved.
+                
+                # Logic: If values changed from what is in `stock`, update DB
+                if (new_name_val != stock['name'] or 
+                    abs(new_val_val - stock['current_value']) > 0.01 or 
+                    abs(new_target_val - stock['target_allocation']) > 0.01):
+                    
+                    # Update the specific row in the main `data` dataframe
+                    # Find the row index in the FILTERED dataframe
+                    filtered_idx = user_stocks_df.index[idx]
+                    
+                    data.at[filtered_idx, 'stock_name'] = new_name_val
+                    data.at[filtered_idx, 'current_value'] = new_val_val
+                    data.at[filtered_idx, 'target_allocation'] = new_target_val
+                    
+                    conn.update(worksheet="Portfolios", data=data)
+                    # No rerun needed here, the loop continues, but the validation logic below will catch it
+                    # actually st.rerun() is safer to refresh the view
+                    st.rerun()
+
                 with cols[3]:
                     if st.button("🗑️", key=f"remove_{idx}"):
-                        stocks_to_remove.append(idx)
-        
-        # Remove stocks marked for deletion
-        for idx in reversed(stocks_to_remove):
-            st.session_state.stocks.pop(idx)
-            st.rerun()
-        
-        st.markdown("---")
+                        filtered_idx = user_stocks_df.index[idx]
+                        data = data.drop(filtered_idx)
+                        conn.update(worksheet="Portfolios", data=data)
+                        st.rerun()
+    
+    st.markdown("---")
 
     with col2:
         st.subheader("📈 Summary")
