@@ -203,7 +203,41 @@ elif authentication_status:
         
         # Market Indicators
         st.markdown("### Market Indicators")
-        use_market_indicators = st.checkbox("Use Market Indicators", value=False, help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio")
+        
+        # Track state transitions for reverting to manual targets
+        if 'prev_indicators_state' not in st.session_state:
+            st.session_state.prev_indicators_state = False
+            
+        use_market_indicators = st.checkbox("Use Market Indicators", value=st.session_state.prev_indicators_state, help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio")
+        
+        # Detect Transition: ON -> OFF
+        if not use_market_indicators and st.session_state.prev_indicators_state:
+            if st.session_state.saved_manual_targets.get(selected_portfolio):
+                manual_map = st.session_state.saved_manual_targets[selected_portfolio]
+                
+                # Filter for this portfolio's rows in global 'data'
+                mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                
+                # Update 'data' with manual targets before saving back to DB
+                for stock_name, target in manual_map.items():
+                    data.loc[mask & (data['stock_name'] == stock_name), 'target_allocation'] = target
+                
+                conn.update(worksheet="Portfolios", data=data)
+                
+                # Update session state and widget keys
+                for i, stock in enumerate(st.session_state.stocks):
+                    if stock['name'] in manual_map:
+                        val = manual_map[stock['name']]
+                        st.session_state.stocks[i]['target_allocation'] = val
+                        st.session_state[f"{selected_portfolio}_{i}_target"] = val
+                
+                st.session_state.prev_indicators_state = False
+                st.toast("Reverted to manual allocations!", icon="↩️")
+                st.rerun()
+
+        # Update state for next check if it was OFF->ON
+        if use_market_indicators and not st.session_state.prev_indicators_state:
+            st.session_state.prev_indicators_state = True
         
         if use_market_indicators:
             buffett_index = st.number_input("Buffett Indicator (%)", value=223.73, step=0.1, help="Market Cap to GDP")
@@ -498,9 +532,24 @@ elif authentication_status:
                 stock_gaps.append({
                     "name": stock['name'],
                     "gap": gap,
-                    "target": stock['target_allocation']
+                    "target": stock['target_allocation'],
+                    "current_val": stock['current_value']
                 })
                 total_gap += gap
+            
+            # --- "Cash Needed to Rebalance" Insight ---
+            # To rebalance purely by buying (no sell), the portfolio must grow until 
+            # the current most-overweight asset matches its target percentage perfectly.
+            ratios = []
+            for s in st.session_state.stocks:
+                if s['target_allocation'] > 0:
+                    ratios.append(s['current_value'] / (s['target_allocation'] / 100.0))
+            
+            if ratios:
+                required_total = max(ratios)
+                cash_needed_total = max(0.0, required_total - total_current)
+            else:
+                cash_needed_total = 0.0
 
             # Distribute Investment
             allocations = {}
@@ -576,6 +625,9 @@ elif authentication_status:
                 
                 target_val_approx = final_actual_new_total * (stock['target_allocation'] / 100)
                 
+                new_percent = new_alloc
+                deviation = new_percent - stock['target_allocation']
+                
                 results.append({
                     "Stock": stock['name'],
                     "Current Value": stock['current_value'],
@@ -584,7 +636,8 @@ elif authentication_status:
                     "Target Value": target_val_approx,
                     "Investment": inv_amount,
                     "New Value": new_val,
-                    "New %": new_alloc
+                    "New %": new_alloc,
+                    "Deviation": deviation
                 })
             
             # Convert to DataFrame
@@ -599,7 +652,8 @@ elif authentication_status:
                     "Target Value": "€{:,.2f}",
                     "Investment": "€{:,.2f}",
                     "New Value": "€{:,.2f}",
-                    "New %": "{:.2f}%"
+                    "New %": "{:.2f}%",
+                    "Deviation": "{:+.2f}%"
                 }),
                 width="stretch",
                 hide_index=True
@@ -619,6 +673,12 @@ elif authentication_status:
             
             if total_investment > monthly_investment:
                 st.warning(f"⚠️ Calculated investment (€{total_investment:,.2f}) exceeds available amount (€{monthly_investment:,.2f}). Consider adjusting your targets or increasing investment amount.")
+            
+            # --- Rebalancing Bottleneck Insight ---
+            if cash_needed_total > monthly_investment:
+                st.info(f"💡 **Insight:** To perfectly rebalance without selling, you would need to invest **€{cash_needed_total:,.2f}**. Your current €{monthly_investment:,.2f} covers { (monthly_investment/cash_needed_total)*100:.1f}% of the required injection to offset overweight assets.")
+            elif cash_needed_total > 0:
+                st.success(f"✅ **Insight:** Your €{monthly_investment:,.2f} investment is sufficient to fully rebalance this portfolio (Required: €{cash_needed_total:,.2f}).")
             
             # Visualization
             st.markdown("---")
