@@ -7,6 +7,7 @@ import yaml
 from yaml.loader import SafeLoader
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -638,6 +639,39 @@ elif authentication_status:
                 st.info(f"💡 **Insight:** To perfectly rebalance without selling, you would need **€{calc['cash_needed_total']:,.2f}**.")
             elif calc['cash_needed_total'] > 0:
                 st.success(f"✅ **Insight:** Your €{calc['monthly_investment']:,.2f} is sufficient to fully rebalance.")
+
+            # --- Save to History ---
+            if st.button("💾 Save to Investment History", type="primary", use_container_width=True):
+                with st.spinner("Logging investment..."):
+                    try:
+                        # Prepare data for history log
+                        log_rows = df.copy()
+                        log_rows['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        log_rows['username'] = username
+                        log_rows['portfolio_name'] = selected_portfolio
+                        
+                        # Reorder columns for better readability in GSheets
+                        cols = ['timestamp', 'username', 'portfolio_name', 'Stock', 'Current Value', 'Current %', 'Target %', 'Target Value', 'Investment', 'New Value', 'New %', 'Deviation']
+                        log_df = log_rows[cols]
+                        
+                        # Read existing history to append
+                        try:
+                            # We use a very short TTL to ensure we get the latest for appending
+                            existing_history = conn.read(worksheet="InvestmentLog", ttl=0)
+                        except Exception:
+                            existing_history = pd.DataFrame()
+                        
+                        if existing_history is not None and not existing_history.empty:
+                            new_history = pd.concat([existing_history, log_df], ignore_index=True)
+                        else:
+                            new_history = log_df
+                        
+                        # Update the worksheet
+                        conn.update(worksheet="InvestmentLog", data=new_history)
+                        st.success("Investment successfully logged to 'InvestmentLog' sheet!")
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Failed to save history: {e}")
 
             st.markdown("---")
             st.subheader("📊 Allocation Comparison")
