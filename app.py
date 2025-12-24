@@ -75,47 +75,44 @@ elif authentication_status:
     from streamlit_gsheets import GSheetsConnection
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Load data from Google Sheets
-    try:
-        data = conn.read(worksheet="Portfolios", ttl="0") # ttl=0 for fresh data
-        
-        # Ensure data is a DataFrame (read can sometimes return unexpected types if empty)
-        if data is None:
-            data = pd.DataFrame()
-            
-        # Ensure 'portfolio_name' column exists (migration)
-        if not data.empty and 'portfolio_name' not in data.columns:
-            data['portfolio_name'] = 'Default'
-        
-        # Ensure consistency by defining all required columns
-        required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']
-        
-        # If empty or missing crucial columns, enforce structure
-        if data.empty:
-            data = pd.DataFrame(columns=required_columns)
-        else:
-            # Add any missing columns with NA
-            for col in required_columns:
-                if col not in data.columns:
-                    data[col] = pd.NA
-                    
-            # Ensure correct types
-            data = data.astype({
-                'username': 'str',
-                'stock_name': 'str', 
-                'current_value': 'float',
-                'target_allocation': 'float',
-                'portfolio_name': 'str'
-            })
-            
-            # Fill NaNs specifically for key grouping columns to allow filtering
-            data['portfolio_name'] = data['portfolio_name'].fillna('Default')
-            data['username'] = data['username'].fillna('unknown') 
 
-    except Exception as e:
-        # Fallback if connection fails entirely
-        # st.error(f"Error loading data: {e}") # Optional: show error to user?
-        data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name'])
+    # Load data from Google Sheets into Session State
+    if 'master_data' not in st.session_state:
+        try:
+            # Load with a cache but then move to Session State for "instant" local updates
+            raw_data = conn.read(worksheet="Portfolios", ttl="10m") 
+            
+            if raw_data is None:
+                raw_data = pd.DataFrame()
+                
+            if not raw_data.empty and 'portfolio_name' not in raw_data.columns:
+                raw_data['portfolio_name'] = 'Default'
+            
+            required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']
+            
+            if raw_data.empty:
+                raw_data = pd.DataFrame(columns=required_columns)
+            else:
+                for col in required_columns:
+                    if col not in raw_data.columns:
+                        raw_data[col] = pd.NA
+                        
+                raw_data = raw_data.astype({
+                    'username': 'str',
+                    'stock_name': 'str', 
+                    'current_value': 'float',
+                    'target_allocation': 'float',
+                    'portfolio_name': 'str'
+                })
+                raw_data['portfolio_name'] = raw_data['portfolio_name'].fillna('Default')
+                raw_data['username'] = raw_data['username'].fillna('unknown') 
+
+            st.session_state.master_data = raw_data
+
+        except Exception as e:
+            st.session_state.master_data = pd.DataFrame(columns=['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name'])
+
+    data = st.session_state.master_data
 
     # Filter for current user
     user_all_data = data[data['username'] == username]
@@ -159,6 +156,7 @@ elif authentication_status:
                         "target_allocation": 0.0
                     }])
                     updated_data = pd.concat([data, new_row], ignore_index=True)
+                    st.session_state.master_data = updated_data
                     conn.update(worksheet="Portfolios", data=updated_data)
                     
                     st.session_state.new_portfolio_created = new_portfolio_input
@@ -173,8 +171,9 @@ elif authentication_status:
                 if st.button("Confirm Delete", type="primary", key="delete_portfolio_btn"):
                     # Remove all rows belonging to this portfolio
                     mask_to_delete = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
-                    data = data[~mask_to_delete]
-                    conn.update(worksheet="Portfolios", data=data)
+                    updated_data = data[~mask_to_delete]
+                    st.session_state.master_data = updated_data
+                    conn.update(worksheet="Portfolios", data=updated_data)
                     st.toast(f"Deleted portfolio: {selected_portfolio}")
                     st.rerun()
 
@@ -222,6 +221,7 @@ elif authentication_status:
                 for stock_name, target in manual_map.items():
                     data.loc[mask & (data['stock_name'] == stock_name), 'target_allocation'] = target
                 
+                st.session_state.master_data = data
                 conn.update(worksheet="Portfolios", data=data)
                 
                 # Update session state and widget keys
@@ -350,6 +350,7 @@ elif authentication_status:
                         data = data[~mask_placeholder]
 
                     updated_data = pd.concat([data, new_row], ignore_index=True)
+                    st.session_state.master_data = updated_data
                     conn.update(worksheet="Portfolios", data=updated_data)
                     st.success(f"Added {new_name}")
                     st.rerun()
@@ -372,8 +373,9 @@ elif authentication_status:
             {"username": username, "portfolio_name": "Default", "stock_name": "Stock C", "current_value": 500.0, "target_allocation": 30.0},
         ]
         new_rows = pd.DataFrame(default_stocks)
-        data = pd.concat([data, new_rows], ignore_index=True)
-        conn.update(worksheet="Portfolios", data=data)
+        updated_data = pd.concat([data, new_rows], ignore_index=True)
+        st.session_state.master_data = updated_data
+        conn.update(worksheet="Portfolios", data=updated_data)
         st.toast("Initialized default portfolio!", icon="🌱")
         user_portfolio_df = new_rows # Update local view
 
@@ -445,21 +447,8 @@ elif authentication_status:
                         label_visibility="collapsed"
                     )
                 
-                # Check for changes & Save immediately
-                if (new_name_val != stock['name'] or 
-                    abs(new_val_val - stock['current_value']) > 0.01 or 
-                    abs(new_target_val - stock['target_allocation']) > 0.01):
-                    
-                    # Update the specific row in the main `data` dataframe
-                    # Find the row index in the FILTERED dataframe (user_portfolio_df)
-                    filtered_idx = user_portfolio_df.index[idx]
-                    
-                    data.at[filtered_idx, 'stock_name'] = new_name_val
-                    data.at[filtered_idx, 'current_value'] = new_val_val
-                    data.at[filtered_idx, 'target_allocation'] = new_target_val
-                    
-                    conn.update(worksheet="Portfolios", data=data)
-                    st.rerun()
+                # Check for changes & Save immediately (REMOVED: causes focus loss)
+                # We now use a bulk save button at the bottom
 
                 with cols[3]:
                     if st.button("🗑️", key=f"{key_prefix}_remove"):
@@ -475,22 +464,66 @@ elif authentication_status:
                                 "current_value": 0.0,
                                 "target_allocation": 0.0
                             }])
-                             # Note: We must drop from the ORIGINAL data here, not the already-dropped one if we had dropped earlier.
-                             # But now we only drop here.
-                             data = pd.concat([data.drop(filtered_idx), placeholder_row], ignore_index=True)
+                             updated_data = pd.concat([data.drop(filtered_idx), placeholder_row], ignore_index=True)
                         else:
-                             data = data.drop(filtered_idx)
+                             updated_data = data.drop(filtered_idx)
 
-                        conn.update(worksheet="Portfolios", data=data)
+                        st.session_state.master_data = updated_data
+                        conn.update(worksheet="Portfolios", data=updated_data)
                         st.rerun()
+
+        # --- Live Calculation Logic ---
+        # Synchronize "live" values for calculations (Summary/Recommendations) 
+        # using current widget state before saving to GSheets.
+        live_stocks = []
+        for idx, stock in enumerate(st.session_state.stocks):
+            key_prefix = f"{selected_portfolio}_{idx}"
+            live_stocks.append({
+                "name": st.session_state.get(f"{key_prefix}_name", stock['name']),
+                "current_value": st.session_state.get(f"{key_prefix}_value", stock['current_value']),
+                "target_allocation": st.session_state.get(f"{key_prefix}_target", stock['target_allocation'])
+            })
+        
+        # NOTE: We do NOT override st.session_state.stocks here because we need it
+        # to detect changes in the "Save" block below.
+
+        # Bulk Save Button for Edits
+        if st.session_state.stocks:
+            if st.button("💾 Save All Changes", type="primary", use_container_width=True):
+                any_changes = False
+                for idx, stock in enumerate(st.session_state.stocks):
+                    key_prefix = f"{selected_portfolio}_{idx}"
+                    
+                    # Fetch current values from session state / widget keys
+                    new_name = st.session_state.get(f"{key_prefix}_name", stock['name'])
+                    new_val = st.session_state.get(f"{key_prefix}_value", stock['current_value'])
+                    new_target = st.session_state.get(f"{key_prefix}_target", stock['target_allocation'])
+                    
+                    if (new_name != stock['name'] or 
+                        abs(new_val - stock['current_value']) > 0.01 or 
+                        abs(new_target - stock['target_allocation']) > 0.01):
+                        
+                        filtered_idx = user_portfolio_df.index[idx]
+                        data.at[filtered_idx, 'stock_name'] = new_name
+                        data.at[filtered_idx, 'current_value'] = new_val
+                        data.at[filtered_idx, 'target_allocation'] = new_target
+                        any_changes = True
+                
+                if any_changes:
+                    st.session_state.master_data = data
+                    conn.update(worksheet="Portfolios", data=data)
+                    st.success("All changes saved successfully!")
+                    st.rerun()
+                else:
+                    st.info("No changes detected.")
     
     st.markdown("---")
 
     with col2:
         st.subheader("📈 Summary")
         
-        total_current = sum(s['current_value'] for s in st.session_state.stocks)
-        total_target = sum(s['target_allocation'] for s in st.session_state.stocks)
+        total_current = sum(s['current_value'] for s in live_stocks)
+        total_target = sum(s['target_allocation'] for s in live_stocks)
         
         st.metric("Total Portfolio Value", f"€{total_current:,.2f}")
         st.metric("Total Target Allocation", f"{total_target:.1f}%")
@@ -500,7 +533,7 @@ elif authentication_status:
 
     # Calculate allocations
     if st.button("🧮 Calculate Investment Allocation", type="primary", width="stretch"):
-        if abs(sum(s['target_allocation'] for s in st.session_state.stocks) - 100.0) > 0.01:
+        if abs(sum(s['target_allocation'] for s in live_stocks) - 100.0) > 0.01:
             st.error("Please ensure target allocations sum to 100%")
         else:
             st.markdown("---")
@@ -511,7 +544,7 @@ elif authentication_status:
             # 2. Strategy: Aim for Target Allocation of the *Future* Total Portfolio Value.
             #    This ensures "distribute to all" behavior when cash is added, while still correcting imbalances.
             
-            total_current = sum(s['current_value'] for s in st.session_state.stocks)
+            total_current = sum(s['current_value'] for s in live_stocks)
             new_total_theoretical = total_current + monthly_investment
             
             # Calculate the "Ideal" ending value for each stock
@@ -521,7 +554,7 @@ elif authentication_status:
             
             stock_gaps = []
             
-            for stock in st.session_state.stocks:
+            for stock in live_stocks:
                 ideal_value = new_total_theoretical * (stock['target_allocation'] / 100.0)
                 gap = ideal_value - stock['current_value']
                 
@@ -541,7 +574,7 @@ elif authentication_status:
             # To rebalance purely by buying (no sell), the portfolio must grow until 
             # the current most-overweight asset matches its target percentage perfectly.
             ratios = []
-            for s in st.session_state.stocks:
+            for s in live_stocks:
                 if s['target_allocation'] > 0:
                     ratios.append(s['current_value'] / (s['target_allocation'] / 100.0))
             
@@ -582,7 +615,7 @@ elif authentication_status:
                         allocations[s['name']] = 0
             else:
                 # Fallback (e.g. everything was perfect or confusing state): Distribute by target
-                for stock in st.session_state.stocks:
+                for stock in live_stocks:
                     allocations[stock['name']] = monthly_investment * (stock['target_allocation'] / 100.0)
 
             # --- Integer Constraint Logic ---
@@ -614,7 +647,7 @@ elif authentication_status:
             results = []
             final_actual_new_total = total_current + monthly_investment
             
-            for stock in st.session_state.stocks:
+            for stock in live_stocks:
                 inv_amount = integer_allocations[stock['name']]
                 
                 current_alloc = (stock['current_value'] / total_current * 100) if total_current > 0 else 0
