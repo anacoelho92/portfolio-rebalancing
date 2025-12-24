@@ -29,6 +29,14 @@ def clear_recommendations():
     st.session_state.show_recommendations = False
     st.session_state.last_calculation = None
 
+def reset_portfolio_state():
+    clear_recommendations()
+    if 'portfolio_selector' in st.session_state:
+        selected = st.session_state.portfolio_selector
+        keys_to_clear = [k for k in st.session_state.keys() if k.startswith(f"{selected}_")]
+        for k in keys_to_clear:
+            del st.session_state[k]
+
 # Get secrets
 admin_hash = os.getenv('ADMIN_PASSWORD_HASH')
 cookie_key = os.getenv('COOKIE_KEY')
@@ -163,7 +171,7 @@ elif authentication_status:
                 existing_portfolios, 
                 index=default_index, 
                 key="portfolio_selector",
-                on_change=clear_recommendations
+                on_change=reset_portfolio_state
             )
             # If a new portfolio was just created and we just rendered the selectbox with it, we can clear the flag
             if 'new_portfolio_created' in st.session_state and st.session_state.new_portfolio_created == selected_portfolio:
@@ -191,7 +199,7 @@ elif authentication_status:
                     
                     st.session_state.new_portfolio_created = new_portfolio_input
                     st.session_state.has_unsaved_changes = False # Just synced
-                    clear_recommendations()
+                    reset_portfolio_state()
                     st.success(f"Created '{new_portfolio_input}'!")
                     st.rerun()
 
@@ -208,7 +216,7 @@ elif authentication_status:
                     st.session_state.master_data = updated_data
                     conn.update(worksheet="Portfolios", data=updated_data)
                     st.session_state.has_unsaved_changes = False # Just synced
-                    clear_recommendations()
+                    reset_portfolio_state()
                     st.toast(f"Deleted portfolio: {selected_portfolio}")
                     st.rerun()
 
@@ -228,6 +236,18 @@ elif authentication_status:
     
     # We store the original values for change detection
     st.session_state.stocks = current_stocks
+
+    # Pre-populate session state keys for widgets if they don't exist
+    # This prevents the "Session State API vs Default Value" conflict
+    if selected_portfolio:
+        for idx, stock in enumerate(current_stocks):
+            key_prefix = f"{selected_portfolio}_{idx}"
+            if f"{key_prefix}_name" not in st.session_state:
+                st.session_state[f"{key_prefix}_name"] = stock['name']
+            if f"{key_prefix}_value" not in st.session_state:
+                st.session_state[f"{key_prefix}_value"] = float(stock['current_value'])
+            if f"{key_prefix}_target" not in st.session_state:
+                st.session_state[f"{key_prefix}_target"] = float(stock['target_allocation'])
 
     # Sidebar utilities (Configuration and Indicators)
     with st.sidebar:
@@ -386,7 +406,7 @@ elif authentication_status:
                         st.session_state.master_data = updated_data
                         # Deferred: conn.update(worksheet="Portfolios", data=updated_data)
                         st.session_state.has_unsaved_changes = True
-                        clear_recommendations()
+                        reset_portfolio_state()
                         st.success(f"Added {new_name}")
                         st.rerun()
                     else:
@@ -429,7 +449,6 @@ elif authentication_status:
                         with cols[0]:
                             new_name_val = st.text_input(
                                 "Name",
-                                value=stock['name'],
                                 key=f"{key_prefix}_name",
                                 label_visibility="collapsed",
                                 on_change=clear_recommendations
@@ -439,7 +458,6 @@ elif authentication_status:
                             new_val_val = st.number_input(
                                 "Current Value",
                                 min_value=0.0,
-                                value=float(stock['current_value']),
                                 step=100.0,
                                 key=f"{key_prefix}_value",
                                 label_visibility="collapsed",
@@ -451,7 +469,6 @@ elif authentication_status:
                                 "Target %",
                                 min_value=0.0,
                                 max_value=100.0,
-                                value=float(stock['target_allocation']),
                                 step=1.0,
                                 key=f"{key_prefix}_target",
                                 label_visibility="collapsed",
@@ -482,7 +499,7 @@ elif authentication_status:
                                 st.session_state.master_data = updated_data
                                 # Deferred: conn.update(worksheet="Portfolios", data=updated_data)
                                 st.session_state.has_unsaved_changes = True
-                                clear_recommendations()
+                                reset_portfolio_state()
                                 st.rerun()
 
             # --- Live Calculation Logic ---
