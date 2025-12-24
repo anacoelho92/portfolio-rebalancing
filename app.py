@@ -164,62 +164,85 @@ elif authentication_status:
     # --- Sidebar UI ---
     with st.sidebar:
         # 1. Portfolios Section
-        st.header("📂 Portfolios")
-        
-        if existing_portfolios:
-            selected_portfolio = st.selectbox(
-                "Select Portfolio", 
-                existing_portfolios, 
-                index=default_index, 
-                key="portfolio_selector",
-                on_change=reset_portfolio_state
-            )
-            # If a new portfolio was just created and we just rendered the selectbox with it, we can clear the flag
-            if 'new_portfolio_created' in st.session_state and st.session_state.new_portfolio_created == selected_portfolio:
-                del st.session_state.new_portfolio_created
-        else:
-            selected_portfolio = None
-            st.info("No portfolios found.")
-        
-        # Create New Portfolio
-        with st.expander("Create New Portfolio"):
-            new_portfolio_input = st.text_input("Name", placeholder="e.g., Retirement")
-            if st.button("Create"):
-                if new_portfolio_input and new_portfolio_input not in existing_portfolios:
-                    # Create a placeholder row to persist the portfolio name
-                    new_row = pd.DataFrame([{
-                        "username": username,
-                        "portfolio_name": new_portfolio_input,
-                        "stock_name": "__PLACEHOLDER__",
-                        "current_value": 0.0,
-                        "target_allocation": 0.0
-                    }])
-                    updated_data = pd.concat([data, new_row], ignore_index=True)
-                    st.session_state.master_data = updated_data
-                    conn.update(worksheet="Portfolios", data=updated_data)
-                    
-                    st.session_state.new_portfolio_created = new_portfolio_input
-                    st.session_state.has_unsaved_changes = False # Just synced
-                    reset_portfolio_state()
-                    st.success(f"Created '{new_portfolio_input}'!")
-                    st.rerun()
+        with st.expander("📂 Portfolios", expanded=True):
+            if existing_portfolios:
+                selected_portfolio = st.selectbox(
+                    "Select Portfolio", 
+                    existing_portfolios, 
+                    index=default_index, 
+                    key="portfolio_selector",
+                    on_change=reset_portfolio_state
+                )
+                # If a new portfolio was just created and we just rendered the selectbox with it, we can clear the flag
+                if 'new_portfolio_created' in st.session_state and st.session_state.new_portfolio_created == selected_portfolio:
+                    del st.session_state.new_portfolio_created
+            else:
+                selected_portfolio = None
+                st.info("No portfolios found.")
+            
+            # Create New Portfolio
+            with st.expander("Create New Portfolio"):
+                new_portfolio_input = st.text_input("Name", placeholder="e.g., Retirement")
+                if st.button("Create"):
+                    if new_portfolio_input and new_portfolio_input not in existing_portfolios:
+                        # Create a placeholder row to persist the portfolio name
+                        new_row = pd.DataFrame([{
+                            "username": username,
+                            "portfolio_name": new_portfolio_input,
+                            "stock_name": "__PLACEHOLDER__",
+                            "current_value": 0.0,
+                            "target_allocation": 0.0
+                        }])
+                        updated_data = pd.concat([data, new_row], ignore_index=True)
+                        st.session_state.master_data = updated_data
+                        conn.update(worksheet="Portfolios", data=updated_data)
+                        
+                        st.session_state.new_portfolio_created = new_portfolio_input
+                        st.session_state.has_unsaved_changes = False # Just synced
+                        reset_portfolio_state()
+                        st.success(f"Created '{new_portfolio_input}'!")
+                        st.rerun()
 
 
-        # Delete Portfolio
-        if selected_portfolio:
-            st.markdown("---")
-            with st.expander(f"⚠️ Delete '{selected_portfolio}'"):
-                st.warning("This action cannot be undone.")
-                if st.button("Confirm Delete", type="primary", key="delete_portfolio_btn"):
-                    # Remove all rows belonging to this portfolio
-                    mask_to_delete = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
-                    updated_data = data[~mask_to_delete]
-                    st.session_state.master_data = updated_data
-                    conn.update(worksheet="Portfolios", data=updated_data)
-                    st.session_state.has_unsaved_changes = False # Just synced
-                    reset_portfolio_state()
-                    st.toast(f"Deleted portfolio: {selected_portfolio}")
-                    st.rerun()
+            # Rename Portfolio
+            if selected_portfolio:
+                with st.expander(f"📝 Rename '{selected_portfolio}'"):
+                    new_name_input = st.text_input("New Name", placeholder="e.g., Retirement 2026")
+                    if st.button("Save New Name"):
+                        if new_name_input and new_name_input not in existing_portfolios:
+                            # Update all rows in master data
+                            mask = (st.session_state.master_data['username'] == username) & \
+                                   (st.session_state.master_data['portfolio_name'] == selected_portfolio)
+                            
+                            st.session_state.master_data.loc[mask, 'portfolio_name'] = new_name_input
+                            conn.update(worksheet="Portfolios", data=st.session_state.master_data)
+                            
+                            st.session_state.new_portfolio_created = new_name_input
+                            st.session_state.has_unsaved_changes = False # Just synced
+                            reset_portfolio_state()
+                            st.success(f"Renamed to '{new_name_input}'!")
+                            st.rerun()
+                        elif new_name_input in existing_portfolios:
+                            st.error("A portfolio with this name already exists.")
+                        else:
+                            st.error("Please enter a valid name.")
+
+            # Delete Portfolio
+            if selected_portfolio:
+                with st.expander(f"⚠️ Delete '{selected_portfolio}'"):
+                    st.warning("This action cannot be undone.")
+                    if st.button("Confirm Delete", type="primary", key="delete_portfolio_btn"):
+                        # Remove all rows belonging to this portfolio
+                        mask_to_delete = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                        updated_data = data[~mask_to_delete]
+                        st.session_state.master_data = updated_data
+                        conn.update(worksheet="Portfolios", data=updated_data)
+                        st.session_state.has_unsaved_changes = False # Just synced
+                        reset_portfolio_state()
+                        st.toast(f"Deleted portfolio: {selected_portfolio}")
+                        st.rerun()
+        
+        pass
 
     # --- Sync Data Logic (Source of Truth) ---
     # Load current stocks from Master data (Persistent state)
@@ -254,134 +277,132 @@ elif authentication_status:
     with st.sidebar:
         if selected_portfolio:
             # 2. Configuration Section
-            st.header("⚙️ Configuration")
-            monthly_investment = st.number_input(
-                "Monthly Investment Amount (€)",
-                min_value=0.0,
-                value=1000.0,
-                step=100.0,
-                help="Amount you want to invest this month",
-                on_change=clear_recommendations
-            )
-            
-            # Market Indicators
-            st.markdown("### Market Indicators")
-            
-            # Track state transitions for reverting to manual targets
-            if 'prev_indicators_state' not in st.session_state:
-                st.session_state.prev_indicators_state = False
+            with st.expander("⚙️ Configuration", expanded=False):
+                monthly_investment = st.number_input(
+                    "Monthly Investment Amount (€)",
+                    min_value=0.0,
+                    value=1000.0,
+                    step=100.0,
+                    help="Amount you want to invest this month",
+                    on_change=clear_recommendations
+                )
                 
-            use_market_indicators = st.checkbox(
-                "Use Market Indicators", 
-                value=st.session_state.prev_indicators_state, 
-                help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio",
-                on_change=clear_recommendations
-            )
-            
-            # Detect Transition: ON -> OFF
-            if not use_market_indicators and st.session_state.prev_indicators_state:
-                if st.session_state.saved_manual_targets.get(selected_portfolio):
-                    manual_map = st.session_state.saved_manual_targets[selected_portfolio]
-                    
-                    # Filter for this portfolio's rows in global 'data'
-                    mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
-                    
-                    # Update 'data' with manual targets before saving back to DB
-                    for stock_name, target in manual_map.items():
-                        data.loc[mask & (data['stock_name'] == stock_name), 'target_allocation'] = target
-                    
-                    st.session_state.master_data = data
-                    # Deferred: conn.update(worksheet="Portfolios", data=data)
-                    st.session_state.has_unsaved_changes = True
-                    
-                    # Update session state and widget keys
-                    for i, stock in enumerate(st.session_state.stocks):
-                        if stock['name'] in manual_map:
-                            val = manual_map[stock['name']]
-                            st.session_state.stocks[i]['target_allocation'] = val
-                            st.session_state[f"{selected_portfolio}_{i}_target"] = val
-                    
+                # Market Indicators
+                st.markdown("### Market Indicators")
+                
+                # Track state transitions for reverting to manual targets
+                if 'prev_indicators_state' not in st.session_state:
                     st.session_state.prev_indicators_state = False
-                    st.toast("Reverted to manual allocations!", icon="↩️")
-                    st.rerun()
-
-            # Update state for next check if it was OFF->ON
-            if use_market_indicators and not st.session_state.prev_indicators_state:
-                st.session_state.prev_indicators_state = True
-            
-            if use_market_indicators:
-                buffett_index = st.number_input(
-                    "Buffett Indicator (%)", 
-                    value=223.73, 
-                    step=0.1, 
-                    help="Market Cap to GDP",
-                    on_change=clear_recommendations
-                )
-                cape_ratio = st.number_input(
-                    "CAPE Ratio", 
-                    value=39.42, 
-                    step=0.1, 
-                    help="Shiller PE Ratio",
-                    on_change=clear_recommendations
-                )
-                
-                target_ratios = [40, 40, 20] # Default Defensive
-                phase_name = "Unknown/Defensive"
-                
-                if buffett_index <= 150 and cape_ratio < 20:
-                    target_ratios = [70, 10, 20]
-                    phase_name = "Aggressive 🚀"
-                elif (150 < buffett_index <= 190) and (20 <= cape_ratio < 28):
-                    target_ratios = [60, 20, 20]
-                    phase_name = "Normal ⚖️"
-                elif (190 < buffett_index <= 210) and (28 <= cape_ratio < 35):
-                    target_ratios = [50, 30, 20]
-                    phase_name = "Pre-Defensive 🛡️"
-                elif buffett_index >= 210 and cape_ratio >= 35:
-                    target_ratios = [40, 40, 20]
-                    phase_name = "Defensive 🏰"
-                else:
-                     target_ratios = None
-                     phase_name = "Mixed Signals (Hold Current) 🤷"
-
-                if target_ratios:
-                    st.info(f"Current Regime: **{phase_name}** | Applying Targets: {target_ratios}")
                     
-                    if len(st.session_state.stocks) >= 3:
-                        for i in range(3):
-                            new_alloc = float(target_ratios[i])
-                            st.session_state.stocks[i]['target_allocation'] = new_alloc
-                            widget_key = f"{selected_portfolio}_{i}_target"
-                            st.session_state[widget_key] = new_alloc
-                    else:
-                        st.warning("⚠️ Need at least 3 stocks to apply Market Indicator rules.")
-                else:
-                    st.warning(f"Indicators are mixed ({phase_name}). Reverting/Holding manual target allocations.")
+                use_market_indicators = st.checkbox(
+                    "Use Market Indicators", 
+                    value=st.session_state.prev_indicators_state, 
+                    help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio",
+                    on_change=clear_recommendations
+                )
+                
+                # Detect Transition: ON -> OFF
+                if not use_market_indicators and st.session_state.prev_indicators_state:
                     if st.session_state.saved_manual_targets.get(selected_portfolio):
-                         manual_map = st.session_state.saved_manual_targets[selected_portfolio]
-                         if len(st.session_state.stocks) >= 3:
-                             for i in range(3):
-                                 s_name = st.session_state.stocks[i]['name']
-                                 if s_name in manual_map:
-                                     restored_val = manual_map[s_name]
-                                     st.session_state.stocks[i]['target_allocation'] = restored_val
-                                     widget_key = f"{selected_portfolio}_{i}_target"
-                                     st.session_state[widget_key] = restored_val
-            else:
-                 buffett_index = 223.73
-                 cape_ratio = 39.42
-                 
-                 current_targets_map = {}
-                 for _, row in user_portfolio_df.iterrows():
-                     current_targets_map[row['stock_name']] = float(row['target_allocation'])
-                 
-                 st.session_state.saved_manual_targets[selected_portfolio] = current_targets_map
-            
-            st.divider()
+                        manual_map = st.session_state.saved_manual_targets[selected_portfolio]
+                        
+                        # Filter for this portfolio's rows in global 'data'
+                        mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                        
+                        # Update 'data' with manual targets before saving back to DB
+                        for stock_name, target in manual_map.items():
+                            data.loc[mask & (data['stock_name'] == stock_name), 'target_allocation'] = target
+                        
+                        st.session_state.master_data = data
+                        # Deferred: conn.update(worksheet="Portfolios", data=data)
+                        st.session_state.has_unsaved_changes = True
+                        
+                        # Update session state and widget keys
+                        for i, stock in enumerate(st.session_state.stocks):
+                            if stock['name'] in manual_map:
+                                val = manual_map[stock['name']]
+                                st.session_state.stocks[i]['target_allocation'] = val
+                                st.session_state[f"{selected_portfolio}_{i}_target"] = val
+                        
+                        st.session_state.prev_indicators_state = False
+                        st.toast("Reverted to manual allocations!", icon="↩️")
+                        st.rerun()
 
+                # Update state for next check if it was OFF->ON
+                if use_market_indicators and not st.session_state.prev_indicators_state:
+                    st.session_state.prev_indicators_state = True
+                
+                if use_market_indicators:
+                    buffett_index = st.number_input(
+                        "Buffett Indicator (%)", 
+                        value=223.73, 
+                        step=0.1, 
+                        help="Market Cap to GDP",
+                        on_change=clear_recommendations
+                    )
+                    cape_ratio = st.number_input(
+                        "CAPE Ratio", 
+                        value=39.42, 
+                        step=0.1, 
+                        help="Shiller PE Ratio",
+                        on_change=clear_recommendations
+                    )
+                    
+                    target_ratios = [40, 40, 20] # Default Defensive
+                    phase_name = "Unknown/Defensive"
+                    
+                    if buffett_index <= 150 and cape_ratio < 20:
+                        target_ratios = [70, 10, 20]
+                        phase_name = "Aggressive 🚀"
+                    elif (150 < buffett_index <= 190) and (20 <= cape_ratio < 28):
+                        target_ratios = [60, 20, 20]
+                        phase_name = "Normal ⚖️"
+                    elif (190 < buffett_index <= 210) and (28 <= cape_ratio < 35):
+                        target_ratios = [50, 30, 20]
+                        phase_name = "Pre-Defensive 🛡️"
+                    elif buffett_index >= 210 and cape_ratio >= 35:
+                        target_ratios = [40, 40, 20]
+                        phase_name = "Defensive 🏰"
+                    else:
+                         target_ratios = None
+                         phase_name = "Mixed Signals (Hold Current) 🤷"
+
+                    if target_ratios:
+                        st.info(f"Current Regime: **{phase_name}** | Applying Targets: {target_ratios}")
+                        
+                        if len(st.session_state.stocks) >= 3:
+                            for i in range(3):
+                                new_alloc = float(target_ratios[i])
+                                st.session_state.stocks[i]['target_allocation'] = new_alloc
+                                widget_key = f"{selected_portfolio}_{i}_target"
+                                st.session_state[widget_key] = new_alloc
+                        else:
+                            st.warning("⚠️ Need at least 3 stocks to apply Market Indicator rules.")
+                    else:
+                        st.warning(f"Indicators are mixed ({phase_name}). Reverting/Holding manual target allocations.")
+                        if st.session_state.saved_manual_targets.get(selected_portfolio):
+                             manual_map = st.session_state.saved_manual_targets[selected_portfolio]
+                             if len(st.session_state.stocks) >= 3:
+                                 for i in range(3):
+                                     s_name = st.session_state.stocks[i]['name']
+                                     if s_name in manual_map:
+                                         restored_val = manual_map[s_name]
+                                         st.session_state.stocks[i]['target_allocation'] = restored_val
+                                         widget_key = f"{selected_portfolio}_{i}_target"
+                                         st.session_state[widget_key] = restored_val
+                else:
+                     buffett_index = 223.73
+                     cape_ratio = 39.42
+                     
+                     current_targets_map = {}
+                     for _, row in user_portfolio_df.iterrows():
+                         current_targets_map[row['stock_name']] = float(row['target_allocation'])
+                     
+                     st.session_state.saved_manual_targets[selected_portfolio] = current_targets_map
+            
             # 3. Add Stock Section
-            st.header("Manage Stocks")
-            with st.expander("➕ Add New Stock"):
+            with st.expander("🛠️ Stock Management", expanded=False):
+                st.markdown("➕ **Add New Stock**")
                 new_name = st.text_input("Stock Name")
                 new_value = st.number_input("Current Value (€)", min_value=0.0, value=0.0, key="new_value")
                 new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
@@ -520,7 +541,7 @@ elif authentication_status:
 
             # Bulk Save Button for Edits
             if st.session_state.stocks or st.session_state.has_unsaved_changes:
-                if st.button("💾 Save All Changes", type="primary", use_container_width=True):
+                if st.button("💾 Save All Changes", type="primary", width="stretch"):
                     any_content_changes = False
                     for idx, stock in enumerate(st.session_state.stocks):
                         key_prefix = f"{selected_portfolio}_{idx}"
@@ -566,7 +587,7 @@ elif authentication_status:
                 st.warning(f"⚠️ Target allocations should sum to 100%")
 
         # Calculate allocations
-        if st.button("🧮 Calculate Investment Allocation", type="primary", use_container_width=True):
+        if st.button("🧮 Calculate Investment Allocation", type="primary", width="stretch"):
             if abs(sum(s['target_allocation'] for s in live_stocks) - 100.0) > 0.01:
                 st.error("Please ensure target allocations sum to 100%")
             else:
@@ -641,7 +662,7 @@ elif authentication_status:
                 st.success(f"✅ **Insight:** Your €{calc['monthly_investment']:,.2f} is sufficient to fully rebalance.")
 
             # --- Save to History ---
-            if st.button("💾 Save to Investment History", type="primary", use_container_width=True):
+            if st.button("💾 Save to Investment History", type="primary", width="stretch"):
                 with st.spinner("Logging investment..."):
                     try:
                         # Prepare data for history log
@@ -679,11 +700,11 @@ elif authentication_status:
             with col_chart1:
                 fig1 = go.Figure(data=[go.Pie(labels=df['Stock'], values=df['Current Value'], hole=0.3)])
                 fig1.update_layout(title_text="Current Allocation")
-                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig1, width="stretch")
             with col_chart2:
                 fig2 = go.Figure(data=[go.Pie(labels=df['Stock'], values=df['New Value'], hole=0.3)])
                 fig2.update_layout(title_text="After Investment")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width="stretch")
 
     else:
         # Welcome Screen
