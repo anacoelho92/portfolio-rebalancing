@@ -19,7 +19,8 @@ st.markdown("""
 <style>
     /* Global Background & Variables */
     :root {
-        --primary-accent: #FF8B76;
+        --primary-accent: #10B981; /* Emerald Green */
+        --primary-hover: #059669;
         --bg-mint: #EFF6F3;
         --sidebar-dark: #2D2D3A;
         --card-bg: #FFFFFF;
@@ -76,6 +77,39 @@ st.markdown("""
         border-color: rgba(255,255,255,0.1) !important;
     }
 
+    /* Sidebar Headers & General Text - Universal White */
+    [data-testid="stSidebar"] h1, 
+    [data-testid="stSidebar"] h2, 
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] h5,
+    [data-testid="stSidebar"] h6,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] strong,
+    [data-testid="stSidebar"] em,
+    [data-testid="stSidebar"] i,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] .stMarkdown {
+        color: #FFFFFF !important;
+    }
+
+    /* Selectbox/Input values in sidebar - Maintain Dark for Readability */
+    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+    [data-testid="stSidebar"] .stNumberInput input {
+        color: var(--text-dark) !important;
+    }
+
+    /* Sidebar Alerts/Info boxes */
+    [data-testid="stSidebar"] div[data-testid="stNotification"] {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+    
+    [data-testid="stSidebar"] div[data-testid="stNotification"] p,
+    [data-testid="stSidebar"] div[data-testid="stNotification"] strong {
+        color: white !important;
+    }
+
     /* Target Streamlit's native containers for the "Card" look */
     /* This styles st.container(border=True) */
     [data-testid="stElementContainer"] > div:has(div.stVerticalBlockBorder) {
@@ -122,14 +156,14 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     div.stButton > button:first-child:hover {
-        background-color: #FF765C;
-        box-shadow: 0 4px 12px rgba(255, 139, 118, 0.3);
+        background-color: var(--primary-hover);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
     }
 
-    /* Custom Headers */
+    /* Custom Headers for Main Content */
     h1, h2, h3 {
-        color: var(--text-dark) !important;
-        font-weight: 800 !important;
+        color: var(--text-dark);
+        font-weight: 800;
     }
 
     /* Hide standard Streamlit elements */
@@ -158,9 +192,12 @@ if 'show_recommendations' not in st.session_state:
     st.session_state.show_recommendations = False
 if 'last_calculation' not in st.session_state:
     st.session_state.last_calculation = None
+if 'show_save_success' not in st.session_state:
+    st.session_state.show_save_success = False
 
 def clear_recommendations():
     st.session_state.show_recommendations = False
+    st.session_state.show_save_success = False
     st.session_state.last_calculation = None
 
 def reset_portfolio_state():
@@ -390,7 +427,11 @@ elif authentication_status:
     # This list reflects the state AT THE START of the run.
     user_portfolio_df = user_all_data[user_all_data['portfolio_name'] == selected_portfolio] if selected_portfolio else pd.DataFrame()
     user_portfolio_df = user_portfolio_df[user_portfolio_df['stock_name'] != "__PLACEHOLDER__"] if not user_portfolio_df.empty else pd.DataFrame()
-
+    
+    # Order by Target % (Descending)
+    if not user_portfolio_df.empty:
+        user_portfolio_df = user_portfolio_df.sort_values(by='target_allocation', ascending=False)
+    
     current_stocks = []
     for _, row in user_portfolio_df.iterrows():
         current_stocks.append({
@@ -703,8 +744,11 @@ elif authentication_status:
                             st.session_state.master_data = data
                             conn.update(worksheet="Portfolios", data=data)
                             st.session_state.has_unsaved_changes = False
-                            st.success("All changes saved successfully!")
+                            st.session_state.show_save_success = True
                             st.rerun()
+                    
+                    if st.session_state.get('show_save_success'):
+                        st.success("All changes saved successfully!")
 
         with col_side:
             with st.container(border=True):
@@ -819,12 +863,26 @@ elif authentication_status:
                 
                 with chart_col1:
                     fig1 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['Current Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
-                    fig1.update_layout(title_text="Current Allocation", title_font=dict(size=18), legend=dict(font=dict(size=14)), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig1, width="stretch")
+                    fig1.update_layout(
+                        title_text="Current Allocation", 
+                        title_font=dict(size=24), 
+                        legend=dict(font=dict(size=18)),
+                        font=dict(size=16), # Global font size for labels
+                        paper_bgcolor='rgba(0,0,0,0)', 
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
                 with chart_col2:
                     fig2 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['New Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
-                    fig2.update_layout(title_text="After Investment", title_font=dict(size=18), legend=dict(font=dict(size=14)), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig2, width="stretch")
+                    fig2.update_layout(
+                        title_text="After Investment", 
+                        title_font=dict(size=24), 
+                        legend=dict(font=dict(size=18)),
+                        font=dict(size=16), # Global font size for labels
+                        paper_bgcolor='rgba(0,0,0,0)', 
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
 
     else:
         # Welcome Screen
