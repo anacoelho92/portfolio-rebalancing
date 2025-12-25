@@ -21,44 +21,94 @@ st.markdown("""
     :root {
         --primary-accent: #10B981; /* Emerald Green */
         --primary-hover: #059669;
-        --bg-mint: #EFF6F3;
-        --sidebar-dark: #2D2D3A;
-        --card-bg: #FFFFFF;
-        --text-dark: #2D2D3A;
+        --bg-dark: #1E1E2E;
+        --sidebar-light: #D1D5DB; /* Slightly Darker Grey */
+        --card-dark: #2D2D3A;
+        --text-light: #F8FAFC;
+        --text-sidebar: #1F2937; /* Dark Charcoal */
     }
 
     .stApp {
-        background-color: var(--bg-mint);
+        background-color: var(--bg-dark);
     }
 
-    /* Sidebar Styling */
+    /* Sidebar Styling (Light Mode) */
     [data-testid="stSidebar"] {
-        background-color: var(--sidebar-dark);
+        background-color: var(--sidebar-light);
+        border-right: 1px solid rgba(0,0,0,0.05);
     }
     
-    /* Input Labels in Sidebar */
+    /* Input Labels in Sidebar (Dark Text) */
     [data-testid="stSidebar"] label p {
-        color: white !important;
+        color: var(--text-sidebar) !important;
         font-weight: 500 !important;
+    }
+
+    /* High-Visibility Sidebar Toggle (Show/Hide) */
+    button[data-testid="stBaseButton-header"],
+    button[data-testid="stBaseButton-headerNoPadding"],
+    [data-testid="stSidebarCollapsedControl"] button {
+        background-color: var(--primary-accent) !important;
+        color: white !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
+    }
+    
+    button[data-testid="stBaseButton-header"]:hover,
+    button[data-testid="stBaseButton-headerNoPadding"]:hover,
+    [data-testid="stSidebarCollapsedControl"] button:hover {
+        background-color: var(--primary-hover) !important;
+        transform: scale(1.1) !important;
+    }
+
+    button[data-testid="stBaseButton-header"] svg,
+    button[data-testid="stBaseButton-headerNoPadding"] svg,
+    [data-testid="stSidebarCollapsedControl"] svg {
+        fill: white !important;
+        color: white !important;
     }
     
     /* Selectbox/Input values in sidebar */
-    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
-        color: var(--text-dark) !important;
+    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
+    [data-testid="stSidebar"] .stNumberInput input,
+    [data-testid="stSidebar"] .stTextInput input,
+    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
+        color: var(--text-sidebar) !important;
+        background-color: white !important;
+        border-radius: 8px !important;
     }
 
-    /* Expander Styling in Sidebar */
+    /* Fix sidebar number input controls (+/-) visibility */
+    [data-testid="stSidebar"] .stNumberInput div[data-baseweb="input"] {
+        background-color: white !important;
+    }
+    
+    [data-testid="stSidebar"] .stNumberInput button {
+        background-color: #F3F4F6 !important;
+        color: var(--text-sidebar) !important;
+        border: none !important;
+    }
+
+    /* Fix selection text in sidebar inputs */
+    [data-testid="stSidebar"] div[data-baseweb="select"],
+    [data-testid="stSidebar"] .stTextInput div[data-baseweb="base-input"] {
+        background-color: white !important;
+        border-radius: 8px !important;
+    }
+
+    /* Expander Styling in Sidebar - Align with white inputs for maximum contrast */
     [data-testid="stSidebar"] details {
-        border: 1px solid rgba(255,255,255,0.1) !important;
+        border: 1px solid rgba(0,0,0,0.05) !important;
         border-radius: 12px !important;
-        background-color: rgba(255,255,255,0.03) !important;
+        background-color: rgba(0,0,0,0.02) !important;
         margin-bottom: 12px !important;
         overflow: hidden;
     }
     
     [data-testid="stSidebar"] details summary {
         background-color: transparent !important;
-        color: white !important;
+        color: var(--text-sidebar) !important;
         padding: 5px 10px !important;
     }
     
@@ -67,67 +117,148 @@ st.markdown("""
     }
 
     [data-testid="stSidebar"] details summary p {
-        color: white !important;
+        color: var(--text-sidebar) !important;
         font-weight: 600 !important;
         font-size: 1rem !important;
     }
 
+    /* Explicitly target expander chevron icons */
+    [data-testid="stSidebar"] details summary svg,
+    [data-testid="stSidebar"] details summary svg * {
+        fill: var(--text-sidebar) !important;
+        stroke: var(--text-sidebar) !important;
+        color: var(--text-sidebar) !important;
+    }
+
+    /* Sidebar Checkbox Styling - Clean and minimal */
+    [data-testid="stSidebar"] .stCheckbox,
+    [data-testid="stSidebar"] .stCheckbox > label,
+    [data-testid="stSidebar"] .stCheckbox label > div,
+    [data-testid="stSidebar"] .stCheckbox label > div > div {
+        background-color: transparent !important;
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+    
+    [data-testid="stSidebar"] .stCheckbox > label {
+        color: var(--text-sidebar) !important;
+    }
+    
+    /* Target the actual checkbox element using BaseWeb structure */
+    [data-testid="stSidebar"] [data-baseweb="checkbox"] > div {
+        background-color: white !important;
+        border: 1px solid rgba(0,0,0,0.3) !important;
+        border-radius: 3px !important;
+    }
+    
+    /* Unchecked checkbox - make inner checkmark SVG invisible (only direct child) */
+    [data-testid="stSidebar"] [data-baseweb="checkbox"]:not([aria-checked="true"]) > div > svg {
+        fill: none !important;
+        stroke: none !important;
+        opacity: 0 !important;
+    }
+    
+    /* Checked checkbox - emerald green with white checkmark */
+    [data-testid="stSidebar"] [data-baseweb="checkbox"][aria-checked="true"] > div {
+        background-color: var(--primary-accent) !important;
+        border-color: var(--primary-accent) !important;
+    }
+    
+    [data-testid="stSidebar"] [data-baseweb="checkbox"][aria-checked="true"] > div > svg {
+        fill: white !important;
+        opacity: 1 !important;
+    }
+
+    /* Help Icons (?) in sidebar - simple dark icons */
+    [data-testid="stSidebar"] [data-testid="stTooltipIcon"],
+    [data-testid="stSidebar"] .stCheckbox [data-testid="stTooltipIcon"] {
+        color: var(--text-sidebar) !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background-color: transparent !important;
+        border: none !important;
+        margin-left: 4px !important;
+    }
+    
+    [data-testid="stSidebar"] [data-testid="stTooltipIcon"] svg,
+    [data-testid="stSidebar"] .stCheckbox [data-testid="stTooltipIcon"] svg {
+        fill: var(--text-sidebar) !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+
     /* Sidebar Dividers */
     [data-testid="stSidebar"] hr {
-        border-color: rgba(255,255,255,0.1) !important;
+        border-color: rgba(0,0,0,0.05) !important;
     }
 
-    /* Sidebar Headers & General Text - Universal White */
-    [data-testid="stSidebar"] h1, 
-    [data-testid="stSidebar"] h2, 
-    [data-testid="stSidebar"] h3,
-    [data-testid="stSidebar"] h4,
-    [data-testid="stSidebar"] h5,
-    [data-testid="stSidebar"] h6,
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] strong,
-    [data-testid="stSidebar"] em,
-    [data-testid="stSidebar"] i,
-    [data-testid="stSidebar"] span,
+    /* Dataframe row separators - ensure borders are visible on all cells */
+    [data-testid="stDataFrame"] td {
+        border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+    }
+
+    /* Sidebar Headers & General Text - Universal Dark (Aggressive Targeting) */
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] div,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] em,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h4,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h5,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h6,
     [data-testid="stSidebar"] .stMarkdown {
-        color: #FFFFFF !important;
+        color: var(--text-sidebar) !important;
     }
 
-    /* Selectbox/Input values in sidebar - Maintain Dark for Readability */
-    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div,
-    [data-testid="stSidebar"] .stNumberInput input {
-        color: var(--text-dark) !important;
-    }
 
     /* Sidebar Alerts/Info boxes */
     [data-testid="stSidebar"] div[data-testid="stNotification"] {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        background-color: rgba(0, 0, 0, 0.03) !important;
+        border: 1px solid rgba(0, 0, 0, 0.05) !important;
     }
     
+    /* Sidebar Alerts/Info boxes (Aggressive targeting for text visibility) */
+    [data-testid="stSidebar"] div[data-testid="stNotification"] div,
     [data-testid="stSidebar"] div[data-testid="stNotification"] p,
-    [data-testid="stSidebar"] div[data-testid="stNotification"] strong {
+    [data-testid="stSidebar"] div[data-testid="stNotification"] strong,
+    [data-testid="stSidebar"] div[data-testid="stNotification"] span {
+        color: var(--text-sidebar) !important;
+    }
+
+    /* EXPLICIT BUTTON TEXT PROTECTION IN SIDEBAR */
+    [data-testid="stSidebar"] button p,
+    [data-testid="stSidebar"] .stButton button p,
+    [data-testid="stSidebar"] .stButton button span {
         color: white !important;
     }
+
+
 
     /* Target Streamlit's native containers for the "Card" look */
     /* This styles st.container(border=True) */
     [data-testid="stElementContainer"] > div:has(div.stVerticalBlockBorder) {
-        background-color: var(--card-bg) !important;
+        background-color: var(--card-dark) !important;
         border-radius: 15px !important;
         padding: 24px !important;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05) !important;
-        border: 1px solid rgba(0,0,0,0.03) !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2) !important;
+        border: 1px solid rgba(255,255,255,0.05) !important;
         margin-bottom: 20px !important;
     }
 
     /* KPI Metric Cards (Custom CSS for our HTML injection) */
     .kpi-card {
-        background-color: var(--card-bg);
+        background-color: var(--card-dark);
         border-radius: 15px;
         padding: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        border: 1px solid rgba(0,0,0,0.03);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255,255,255,0.05);
         text-align: left;
         margin-bottom: 15px;
     }
@@ -135,17 +266,17 @@ st.markdown("""
         font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 1px;
-        color: #6B7280;
+        color: #94A3B8;
         margin-bottom: 4px;
         font-weight: 600;
     }
     .kpi-value {
         font-size: 1.7rem;
         font-weight: 800;
-        color: var(--text-dark);
+        color: var(--text-light);
     }
 
-    /* Primary Buttons (Salmon) */
+    /* Primary Buttons (Emerald) */
     div.stButton > button:first-child {
         background-color: var(--primary-accent);
         color: white;
@@ -154,22 +285,91 @@ st.markdown("""
         padding: 10px 24px;
         font-weight: 600;
         transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
     div.stButton > button:first-child:hover {
         background-color: var(--primary-hover);
         box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
     }
+    
+        /* Danger Buttons (for Remove) - Centered Emoji */
+    div.stButton button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    
+    div.stButton button p {
+        width: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    
+    /* Specifically for remove buttons (red cross) */
+    div[data-testid="stButton"] button {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    
+    div[data-testid="stButton"] button p {
+        width: auto !important;
+        margin: 0 !important;
+        flex: 1 !important;
+        text-align: center !important;
+    }
+
+
+    div[data-testid="stButton"]:has(button:contains("❌")) button:hover,
+    .danger-btn div.stButton > button:first-child:hover {
+        background-color: #FCA5A5 !important;
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2) !important;
+    }
+
+    /* Target specific inputs in the management table for better alignment */
+    [data-testid="stVerticalBlock"] .stNumberInput input,
+    [data-testid="stVerticalBlock"] .stTextInput input {
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+        height: 38px !important;
+    }
+
+    /* Main App Content - Universal White for Dark Mode (Robust Targeting) */
+    [data-testid="stAppViewContainer"] h1, 
+    [data-testid="stAppViewContainer"] h2, 
+    [data-testid="stAppViewContainer"] h3, 
+    [data-testid="stAppViewContainer"] h4, 
+    [data-testid="stAppViewContainer"] h5, 
+    [data-testid="stAppViewContainer"] h6,
+    [data-testid="stAppViewContainer"] p, 
+    [data-testid="stAppViewContainer"] label, 
+    [data-testid="stAppViewContainer"] span, 
+    [data-testid="stAppViewContainer"] .stMarkdown {
+        color: var(--text-light) !important;
+    }
 
     /* Custom Headers for Main Content */
     h1, h2, h3 {
-        color: var(--text-dark);
+        color: var(--text-light) !important;
         font-weight: 800;
     }
 
-    /* Hide standard Streamlit elements */
+    /* Hide standard Streamlit extras but keep the header for the sidebar toggle */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+    [data-testid="stHeader"] > div {
+        visibility: visible !important;
+    }
+    /* Specifically hide the deploy button and other header junk */
+    [data-testid="stHeader"] button[data-testid="stBaseButton-secondary"],
+    [data-testid="stHeader"] div[data-testid="stStatusWidget"] {
+        display: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -359,7 +559,7 @@ elif authentication_status:
                 st.info("No portfolios found.")
             
             # Create New Portfolio
-            with st.expander("Create New Portfolio"):
+            with st.expander("➕ Create New Portfolio"):
                 new_portfolio_input = st.text_input("Name", placeholder="e.g., Retirement")
                 if st.button("Create"):
                     if new_portfolio_input and new_portfolio_input not in existing_portfolios:
@@ -493,7 +693,7 @@ elif authentication_status:
                 use_market_indicators = st.checkbox(
                     "Use Market Indicators", 
                     key=use_indicators_key,
-                    help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio",
+                    help="Enable rebalancing rules based on Buffett Indicator",
                     on_change=clear_recommendations
                 )
                 
@@ -580,7 +780,7 @@ elif authentication_status:
                 new_name = st.text_input("Stock Name")
                 new_value = st.number_input("Current Value (€)", min_value=0.0, value=0.0, key="new_value")
                 new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
-                new_tolerance = st.number_input("Rebalancing Tolerance (%)", min_value=0.0, max_value=20.0, value=0.0, key="new_tolerance", help="Don't rebalance if drift is less than this %")
+                new_tolerance = st.number_input("Rebalancing Tolerance (%)", min_value=0.0, max_value=20.0, value=0.0, key="new_tolerance", help="Don't rebalance if drift is less/more than this %")
                 
                 if st.button("Add Stock"):
                     if new_name:
@@ -673,7 +873,7 @@ elif authentication_status:
                     for idx, stock in enumerate(st.session_state.stocks):
                         if stock['name'] == "__PLACEHOLDER__": continue
                         key_prefix = f"{selected_portfolio}_{idx}"
-                        r_cols = st.columns([3, 2, 2, 2, 1])
+                        r_cols = st.columns([3, 2, 2, 2, 1], vertical_alignment="center")
                         with r_cols[0]:
                             st.text_input("Name", key=f"{key_prefix}_name", label_visibility="collapsed", on_change=clear_recommendations)
                         with r_cols[1]:
@@ -683,7 +883,7 @@ elif authentication_status:
                         with r_cols[3]:
                             st.number_input("Tolerance", min_value=0.0, max_value=20.0, step=0.1, key=f"{key_prefix}_tolerance", label_visibility="collapsed", on_change=clear_recommendations)
                         with r_cols[4]:
-                            if st.button("🗑️", key=f"{key_prefix}_remove"):
+                            if st.button("❌", key=f"{key_prefix}_remove"):
                                 filtered_idx = user_portfolio_df.index[idx]
                                 remaining_in_portfolio = user_portfolio_df.drop(filtered_idx)
                                 if remaining_in_portfolio.empty:
@@ -837,9 +1037,10 @@ elif authentication_status:
                 # Highlight and style the 'Investment' column
                 styled_df = df.style.format(precision=2).set_properties(
                     subset=['Investment'], 
-                    **{'background-color': '#D1FAE5', 'color': '#065F46', 'font-weight': '700'}
+                    **{'background-color': '#6EE7B7', 'color': '#065F46', 'font-weight': '700', 
+                       'border-bottom': '1px solid #0D9488'}
                 )
-                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                st.table(styled_df)
                 
                 if st.button("💾 Log to History", width="stretch"):
                     with st.spinner("Logging..."):
