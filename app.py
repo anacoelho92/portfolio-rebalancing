@@ -242,14 +242,14 @@ elif authentication_status:
             if not raw_data.empty and 'portfolio_name' not in raw_data.columns:
                 raw_data['portfolio_name'] = 'Default'
             
-            required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name']
+            required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name', 'tolerance']
             
             if raw_data.empty:
                 raw_data = pd.DataFrame(columns=required_columns)
             else:
                 for col in required_columns:
                     if col not in raw_data.columns:
-                        raw_data[col] = pd.NA
+                        raw_data[col] = 0.0 if col in ['current_value', 'target_allocation', 'tolerance'] else ''
                         
                 raw_data = raw_data.astype({
                     'username': 'str',
@@ -388,14 +388,14 @@ elif authentication_status:
         current_stocks.append({
             "name": row['stock_name'],
             "current_value": row['current_value'],
-            "target_allocation": row['target_allocation']
+            "target_allocation": row['target_allocation'],
+            "tolerance": row.get('tolerance', 0.0)
         })
     
     # We store the original values for change detection
     st.session_state.stocks = current_stocks
 
     # Pre-populate session state keys for widgets if they don't exist
-    # This prevents the "Session State API vs Default Value" conflict
     if selected_portfolio:
         for idx, stock in enumerate(current_stocks):
             key_prefix = f"{selected_portfolio}_{idx}"
@@ -405,6 +405,8 @@ elif authentication_status:
                 st.session_state[f"{key_prefix}_value"] = float(stock['current_value'])
             if f"{key_prefix}_target" not in st.session_state:
                 st.session_state[f"{key_prefix}_target"] = float(stock['target_allocation'])
+            if f"{key_prefix}_tolerance" not in st.session_state:
+                st.session_state[f"{key_prefix}_tolerance"] = float(stock.get('tolerance', 0.0))
 
     # Sidebar utilities (Configuration and Indicators)
     with st.sidebar:
@@ -516,6 +518,7 @@ elif authentication_status:
                 new_name = st.text_input("Stock Name")
                 new_value = st.number_input("Current Value (€)", min_value=0.0, value=0.0, key="new_value")
                 new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
+                new_tolerance = st.number_input("Rebalancing Tolerance (%)", min_value=0.0, max_value=20.0, value=0.0, key="new_tolerance", help="Don't rebalance if drift is less than this %")
                 
                 if st.button("Add Stock"):
                     if new_name:
@@ -524,6 +527,7 @@ elif authentication_status:
                             "stock_name": new_name,
                             "current_value": new_value,
                             "target_allocation": new_target,
+                            "tolerance": new_tolerance,
                             "portfolio_name": selected_portfolio
                         }])
                         
@@ -590,15 +594,16 @@ elif authentication_status:
                     st.info("This portfolio is empty. Add stocks using the sidebar!", icon="👈")
                 else:
                     # Headers
-                    h_cols = st.columns([3, 2, 2, 1])
+                    h_cols = st.columns([3, 2, 2, 2, 1])
                     h_cols[0].markdown("**Ticker**")
                     h_cols[1].markdown("**Value (€)**")
                     h_cols[2].markdown("**Target %**")
+                    h_cols[3].markdown("**Tolerance %**")
 
                     for idx, stock in enumerate(st.session_state.stocks):
                         if stock['name'] == "__PLACEHOLDER__": continue
                         key_prefix = f"{selected_portfolio}_{idx}"
-                        r_cols = st.columns([3, 2, 2, 1])
+                        r_cols = st.columns([3, 2, 2, 2, 1])
                         with r_cols[0]:
                             st.text_input("Name", key=f"{key_prefix}_name", label_visibility="collapsed", on_change=clear_recommendations)
                         with r_cols[1]:
@@ -606,6 +611,8 @@ elif authentication_status:
                         with r_cols[2]:
                             st.number_input("Target", min_value=0.0, max_value=100.0, step=1.0, key=f"{key_prefix}_target", label_visibility="collapsed", on_change=clear_recommendations)
                         with r_cols[3]:
+                            st.number_input("Tolerance", min_value=0.0, max_value=20.0, step=0.1, key=f"{key_prefix}_tolerance", label_visibility="collapsed", on_change=clear_recommendations)
+                        with r_cols[4]:
                             if st.button("🗑️", key=f"{key_prefix}_remove"):
                                 filtered_idx = user_portfolio_df.index[idx]
                                 remaining_in_portfolio = user_portfolio_df.drop(filtered_idx)
@@ -627,12 +634,17 @@ elif authentication_status:
                             new_name = st.session_state.get(f"{key_prefix}_name")
                             new_val = st.session_state.get(f"{key_prefix}_value")
                             new_target = st.session_state.get(f"{key_prefix}_target")
+                            new_tolerance = st.session_state.get(f"{key_prefix}_tolerance")
                             orig_row = user_portfolio_df.iloc[idx]
-                            if (new_name != orig_row['stock_name'] or abs(new_val - orig_row['current_value']) > 0.01 or abs(new_target - orig_row['target_allocation']) > 0.01):
+                            if (new_name != orig_row['stock_name'] or 
+                                abs(new_val - orig_row['current_value']) > 0.01 or 
+                                abs(new_target - orig_row['target_allocation']) > 0.01 or
+                                abs(new_tolerance - orig_row.get('tolerance', 0.0)) > 0.01):
                                 filtered_idx = user_portfolio_df.index[idx]
                                 data.at[filtered_idx, 'stock_name'] = new_name
                                 data.at[filtered_idx, 'current_value'] = new_val
                                 data.at[filtered_idx, 'target_allocation'] = new_target
+                                data.at[filtered_idx, 'tolerance'] = new_tolerance
                                 any_content_changes = True
                         if any_content_changes or st.session_state.has_unsaved_changes:
                             st.session_state.master_data = data
@@ -650,56 +662,68 @@ elif authentication_status:
                     else:
                         total_current = sum(s['current_value'] for s in live_stocks)
                         new_total_theoretical = total_current + monthly_investment
-                        stock_gaps = []
+                        
+                        eligible_stocks = []
                         for stock in live_stocks:
+                            current_pct = (stock['current_value'] / total_current * 100) if total_current > 0 else 0
+                            target_pct = stock['target_allocation']
+                            tolerance = stock.get('tolerance', 0.0)
+                            
+                            # Tolerance Rule: Only invest if current % is below (target % - tolerance %)
+                            # OR if the stock is brand new (current value is 0)
+                            if stock['current_value'] == 0 or current_pct < (target_pct - tolerance):
+                                eligible_stocks.append(stock)
+                        
+                        if not eligible_stocks:
+                            st.warning("All stocks are within their tolerance bands! No rebalancing needed.")
+                            # Fallback: Treat all as eligible if they all passed the check but we still want to invest?
+                            # No, let's respect the user's tolerance. If they forced it, we could have a toggle.
+                            # For now, let's just use live_stocks if everything is skipped to avoid "0 results".
+                            eligible_stocks = live_stocks 
+
+                        stock_gaps = []
+                        # Recalculate gaps only for eligible stocks (or all if fallback triggered)
+                        # We use the full new_total_theoretical to find the 'true' gap
+                        for stock in eligible_stocks:
                             target_val = new_total_theoretical * (stock['target_allocation'] / 100.0)
                             gap = target_val - stock['current_value']
                             stock_gaps.append({"Stock": stock['name'], "Target Value": target_val, "Gap": gap, "stock": stock})
-                    sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
-                    remaining_investment = float(monthly_investment)
-                    
-                    temp_allocs = []
-                    # Phase 1: Allocate floored integers to everyone based on priority
-                    for item in sorted_gaps:
-                        # Calculate what this stock WOULD get as a float
-                        ideal_invest = max(0.0, min(item['Gap'], remaining_investment))
-                        # We take the floor to keep it an integer for now
-                        import math
-                        floored_invest = float(math.floor(ideal_invest))
                         
-                        remaining_investment -= floored_invest
-                        temp_allocs.append({
-                            "item": item,
-                            "invest": floored_invest
-                        })
-                    
-                    # Phase 2: Give the ENTIRE remaining balance (including float part) to the first stock
-                    if temp_allocs:
-                        temp_allocs[0]['invest'] += remaining_investment
-                        remaining_investment = 0.0 # Fully allocated now
-                    
-                    allocations = []
-                    new_total_actual = float(total_current + monthly_investment)
-                    
-                    for row in temp_allocs:
-                        item = row['item']
-                        final_invest = row['invest']
-                        stock = item['stock']
-                        new_val = stock['current_value'] + final_invest
+                        sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
+                        remaining_investment = float(monthly_investment)
                         
-                        allocations.append({
-                            "Stock": item['Stock'], 
-                            "Current Value": stock['current_value'], 
-                            "Current %": (stock['current_value'] / total_current * 100) if total_current > 0 else 0, 
-                            "Target %": stock['target_allocation'], 
-                            "Target Value": item['Target Value'],
-                            "Investment": final_invest, 
-                            "New Value": new_val, 
-                            "New %": (new_val / new_total_actual * 100) if new_total_actual > 0 else 0
-                        })
-                    
-                    st.session_state.last_calculation = {"df": pd.DataFrame(allocations), "monthly_investment": monthly_investment, "remaining": remaining_investment}
-                    st.session_state.show_recommendations = True
+                        temp_allocs = []
+                        for item in sorted_gaps:
+                            ideal_invest = max(0.0, min(item['Gap'], remaining_investment))
+                            import math
+                            floored_invest = float(math.floor(ideal_invest))
+                            remaining_investment -= floored_invest
+                            temp_allocs.append({"item": item, "invest": floored_invest})
+                        
+                        if temp_allocs:
+                            temp_allocs[0]['invest'] += remaining_investment
+                            remaining_investment = 0.0 
+                        
+                        allocations = []
+                        new_total_actual = float(total_current + monthly_investment)
+                        for row in temp_allocs:
+                            item = row['item']
+                            final_invest = row['invest']
+                            stock = item['stock']
+                            new_val = stock['current_value'] + final_invest
+                            allocations.append({
+                                "Stock": item['Stock'], 
+                                "Current Value": stock['current_value'], 
+                                "Current %": (stock['current_value'] / total_current * 100) if total_current > 0 else 0, 
+                                "Target %": stock['target_allocation'], 
+                                "Target Value": item['Target Value'],
+                                "Investment": final_invest, 
+                                "New Value": new_val, 
+                                "New %": (new_val / new_total_actual * 100) if new_total_actual > 0 else 0
+                            })
+                        
+                        st.session_state.last_calculation = {"df": pd.DataFrame(allocations), "monthly_investment": monthly_investment, "remaining": remaining_investment}
+                        st.session_state.show_recommendations = True
                 
                 if st.session_state.show_recommendations:
                     st.divider()
