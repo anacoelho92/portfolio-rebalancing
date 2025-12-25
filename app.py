@@ -242,14 +242,22 @@ elif authentication_status:
             if not raw_data.empty and 'portfolio_name' not in raw_data.columns:
                 raw_data['portfolio_name'] = 'Default'
             
-            required_columns = ['username', 'stock_name', 'current_value', 'target_allocation', 'portfolio_name', 'tolerance']
+            required_columns = [
+                'username', 'stock_name', 'current_value', 'target_allocation', 
+                'portfolio_name', 'tolerance', 'portfolio_monthly_invest', 
+                'portfolio_use_indicators', 'portfolio_buffett_index'
+            ]
             
             if raw_data.empty:
                 raw_data = pd.DataFrame(columns=required_columns)
             else:
                 for col in required_columns:
                     if col not in raw_data.columns:
-                        raw_data[col] = 0.0 if col in ['current_value', 'target_allocation', 'tolerance'] else ''
+                        if col == 'portfolio_monthly_invest': raw_data[col] = 1000.0
+                        elif col == 'portfolio_use_indicators': raw_data[col] = False
+                        elif col == 'portfolio_buffett_index': raw_data[col] = 195.0
+                        elif col in ['current_value', 'target_allocation', 'tolerance']: raw_data[col] = 0.0
+                        else: raw_data[col] = ''
                         
                 raw_data = raw_data.astype({
                     'username': 'str',
@@ -397,6 +405,16 @@ elif authentication_status:
 
     # Pre-populate session state keys for widgets if they don't exist
     if selected_portfolio:
+        # Load portfolio-level config from the first row of user_portfolio_df
+        if not user_portfolio_df.empty:
+            first_row = user_portfolio_df.iloc[0]
+            if f"{selected_portfolio}_monthly_invest" not in st.session_state:
+                st.session_state[f"{selected_portfolio}_monthly_invest"] = float(first_row.get('portfolio_monthly_invest', 1000.0))
+            if f"{selected_portfolio}_use_indicators" not in st.session_state:
+                st.session_state[f"{selected_portfolio}_use_indicators"] = bool(first_row.get('portfolio_use_indicators', False))
+            if f"{selected_portfolio}_buffett_index" not in st.session_state:
+                st.session_state[f"{selected_portfolio}_buffett_index"] = float(first_row.get('portfolio_buffett_index', 195.0))
+
         for idx, stock in enumerate(current_stocks):
             key_prefix = f"{selected_portfolio}_{idx}"
             if f"{key_prefix}_name" not in st.session_state:
@@ -413,10 +431,11 @@ elif authentication_status:
         if selected_portfolio:
             # 2. Configuration Section
             with st.expander("⚙️ Configuration", expanded=False):
+                monthly_investment_key = f"{selected_portfolio}_monthly_invest"
                 monthly_investment = st.number_input(
                     "Monthly Investment Amount (€)",
                     min_value=0.0,
-                    value=1000.0,
+                    key=monthly_investment_key,
                     step=100.0,
                     help="Amount you want to invest this month",
                     on_change=clear_recommendations
@@ -429,9 +448,10 @@ elif authentication_status:
                 if 'prev_indicators_state' not in st.session_state:
                     st.session_state.prev_indicators_state = False
                     
+                use_indicators_key = f"{selected_portfolio}_use_indicators"
                 use_market_indicators = st.checkbox(
                     "Use Market Indicators", 
-                    value=st.session_state.prev_indicators_state, 
+                    key=use_indicators_key,
                     help="Enable rebalancing rules based on Buffett Indicator and CAPE Ratio",
                     on_change=clear_recommendations
                 )
@@ -468,9 +488,10 @@ elif authentication_status:
                     st.session_state.prev_indicators_state = True
                 
                 if use_market_indicators:
+                    buffett_index_key = f"{selected_portfolio}_buffett_index"
                     buffett_index = st.number_input(
                         "Buffett Indicator (%)", 
-                        value=195.0, 
+                        key=buffett_index_key,
                         step=0.1, 
                         help="Market Cap to GDP",
                         on_change=clear_recommendations
@@ -522,13 +543,21 @@ elif authentication_status:
                 
                 if st.button("Add Stock"):
                     if new_name:
+                        # Get current portfolio-level config
+                        p_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
+                        p_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
+                        p_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
+
                         new_row = pd.DataFrame([{
                             "username": username,
                             "stock_name": new_name,
                             "current_value": new_value,
                             "target_allocation": new_target,
                             "tolerance": new_tolerance,
-                            "portfolio_name": selected_portfolio
+                            "portfolio_name": selected_portfolio,
+                            "portfolio_monthly_invest": p_invest,
+                            "portfolio_use_indicators": p_use_ind,
+                            "portfolio_buffett_index": p_buffett
                         }])
                         
                         mask_placeholder = (data['username'] == username) & \
@@ -629,6 +658,19 @@ elif authentication_status:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("💾 Save All Changes", width="stretch"):
                         any_content_changes = False
+                        # Always update configuration for the selected portfolio across all its rows
+                        portfolio_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
+                        portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
+                        portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
+
+                        # Update configuration in 'data' for all rows matching this portfolio
+                        # This ensures the configuration is "broadcasted" to all rows
+                        mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                        data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
+                        data.loc[mask, 'portfolio_use_indicators'] = portfolio_use_ind
+                        data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
+
+                        # Check for stock-level changes
                         for idx, stock in enumerate(st.session_state.stocks):
                             key_prefix = f"{selected_portfolio}_{idx}"
                             new_name = st.session_state.get(f"{key_prefix}_name")
@@ -636,6 +678,7 @@ elif authentication_status:
                             new_target = st.session_state.get(f"{key_prefix}_target")
                             new_tolerance = st.session_state.get(f"{key_prefix}_tolerance")
                             orig_row = user_portfolio_df.iloc[idx]
+
                             if (new_name != orig_row['stock_name'] or 
                                 abs(new_val - orig_row['current_value']) > 0.01 or 
                                 abs(new_target - orig_row['target_allocation']) > 0.01 or
@@ -646,6 +689,16 @@ elif authentication_status:
                                 data.at[filtered_idx, 'target_allocation'] = new_target
                                 data.at[filtered_idx, 'tolerance'] = new_tolerance
                                 any_content_changes = True
+                        
+                        # Configuration changes also count as changes
+                        # We compare against the first row of user_portfolio_df
+                        if not user_portfolio_df.empty:
+                            fr = user_portfolio_df.iloc[0]
+                            if (abs(portfolio_invest - fr.get('portfolio_monthly_invest', 1000.0)) > 0.1 or
+                                portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
+                                abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
+                                any_content_changes = True
+
                         if any_content_changes or st.session_state.has_unsaved_changes:
                             st.session_state.master_data = data
                             conn.update(worksheet="Portfolios", data=data)
