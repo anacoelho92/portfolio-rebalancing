@@ -673,9 +673,13 @@ elif authentication_status:
 
             st.markdown("---")
             st.subheader("📊 Allocation Comparison")
+            
+            # Sort alphabetically for consistent plot order
+            df_plot = df.sort_values('Stock')
+            
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
-                fig1 = go.Figure(data=[go.Pie(labels=df['Stock'], values=df['Current Value'], hole=0.3)])
+                fig1 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['Current Value'], hole=0.3)])
                 fig1.update_layout(
                     title_text="Current Allocation",
                     title_font=dict(size=22),
@@ -684,7 +688,7 @@ elif authentication_status:
                 )
                 st.plotly_chart(fig1, width="stretch")
             with col_chart2:
-                fig2 = go.Figure(data=[go.Pie(labels=df['Stock'], values=df['New Value'], hole=0.3)])
+                fig2 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['New Value'], hole=0.3)])
                 fig2.update_layout(
                     title_text="After Investment",
                     title_font=dict(size=22),
