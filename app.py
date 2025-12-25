@@ -655,16 +655,51 @@ elif authentication_status:
                             target_val = new_total_theoretical * (stock['target_allocation'] / 100.0)
                             gap = target_val - stock['current_value']
                             stock_gaps.append({"Stock": stock['name'], "Target Value": target_val, "Gap": gap, "stock": stock})
-                        sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
-                        remaining_investment = monthly_investment
-                        allocations = []
-                        for item in sorted_gaps:
-                            invest = max(0, min(item['Gap'], remaining_investment))
-                            remaining_investment -= invest
-                            new_val = item['stock']['current_value'] + invest
-                            allocations.append({"Stock": item['Stock'], "Current Value": item['stock']['current_value'], "Current %": (item['stock']['current_value'] / total_current * 100) if total_current > 0 else 0, "Target %": item['stock']['target_allocation'], "Target Value": item['Target Value'], "Investment": invest, "New Value": new_val, "New %": (new_val / new_total_theoretical * 100)})
-                        st.session_state.last_calculation = {"df": pd.DataFrame(allocations), "monthly_investment": monthly_investment, "remaining": remaining_investment}
-                        st.session_state.show_recommendations = True
+                    sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
+                    remaining_investment = float(monthly_investment)
+                    
+                    temp_allocs = []
+                    # Phase 1: Allocate floored integers to everyone based on priority
+                    for item in sorted_gaps:
+                        # Calculate what this stock WOULD get as a float
+                        ideal_invest = max(0.0, min(item['Gap'], remaining_investment))
+                        # We take the floor to keep it an integer for now
+                        import math
+                        floored_invest = float(math.floor(ideal_invest))
+                        
+                        remaining_investment -= floored_invest
+                        temp_allocs.append({
+                            "item": item,
+                            "invest": floored_invest
+                        })
+                    
+                    # Phase 2: Give the ENTIRE remaining balance (including float part) to the first stock
+                    if temp_allocs:
+                        temp_allocs[0]['invest'] += remaining_investment
+                        remaining_investment = 0.0 # Fully allocated now
+                    
+                    allocations = []
+                    new_total_actual = float(total_current + monthly_investment)
+                    
+                    for row in temp_allocs:
+                        item = row['item']
+                        final_invest = row['invest']
+                        stock = item['stock']
+                        new_val = stock['current_value'] + final_invest
+                        
+                        allocations.append({
+                            "Stock": item['Stock'], 
+                            "Current Value": stock['current_value'], 
+                            "Current %": (stock['current_value'] / total_current * 100) if total_current > 0 else 0, 
+                            "Target %": stock['target_allocation'], 
+                            "Target Value": item['Target Value'],
+                            "Investment": final_invest, 
+                            "New Value": new_val, 
+                            "New %": (new_val / new_total_actual * 100) if new_total_actual > 0 else 0
+                        })
+                    
+                    st.session_state.last_calculation = {"df": pd.DataFrame(allocations), "monthly_investment": monthly_investment, "remaining": remaining_investment}
+                    st.session_state.show_recommendations = True
                 
                 if st.session_state.show_recommendations:
                     st.divider()
