@@ -335,40 +335,30 @@ elif authentication_status:
                 if use_market_indicators:
                     buffett_index = st.number_input(
                         "Buffett Indicator (%)", 
-                        value=223.73, 
+                        value=195.0, 
                         step=0.1, 
                         help="Market Cap to GDP",
                         on_change=clear_recommendations
                     )
-                    cape_ratio = st.number_input(
-                        "CAPE Ratio", 
-                        value=39.42, 
-                        step=0.1, 
-                        help="Shiller PE Ratio",
-                        on_change=clear_recommendations
-                    )
                     
-                    target_ratios = [40, 40, 20] # Default Defensive
-                    phase_name = "Unknown/Defensive"
+                    target_ratios = None
+                    phase_name = "Unknown"
                     
-                    if buffett_index <= 150 and cape_ratio < 20:
-                        target_ratios = [70, 10, 20]
-                        phase_name = "Aggressive 🚀"
-                    elif (150 < buffett_index <= 190) and (20 <= cape_ratio < 28):
-                        target_ratios = [60, 20, 20]
-                        phase_name = "Normal ⚖️"
-                    elif (190 < buffett_index <= 210) and (28 <= cape_ratio < 35):
-                        target_ratios = [50, 30, 20]
-                        phase_name = "Pre-Defensive 🛡️"
-                    elif buffett_index >= 210 and cape_ratio >= 35:
-                        target_ratios = [40, 40, 20]
-                        phase_name = "Defensive 🏰"
-                    else:
-                         target_ratios = None
-                         phase_name = "Mixed Signals (Hold Current) 🤷"
+                    if buffett_index >= 190.0:
+                        target_ratios = [45, 45, 10]
+                        phase_name = "Highly Overvalued 🏰"
+                    elif 170.0 <= buffett_index < 190.0:
+                        target_ratios = [50, 40, 10]
+                        phase_name = "Overvalued 🛡️"
+                    elif 140.0 <= buffett_index < 170.0:
+                        target_ratios = [60, 30, 10]
+                        phase_name = "Fair Value ⚖️"
+                    elif buffett_index < 140.0:
+                        target_ratios = [70, 20, 10]
+                        phase_name = "Undervalued 🚀"
 
                     if target_ratios:
-                        st.info(f"Current Regime: **{phase_name}** | Applying Targets: {target_ratios}")
+                        st.info(f"Market Status: **{phase_name}** | Target Mix: {target_ratios}")
                         
                         if len(st.session_state.stocks) >= 3:
                             for i in range(3):
@@ -378,21 +368,8 @@ elif authentication_status:
                                 st.session_state[widget_key] = new_alloc
                         else:
                             st.warning("⚠️ Need at least 3 stocks to apply Market Indicator rules.")
-                    else:
-                        st.warning(f"Indicators are mixed ({phase_name}). Reverting/Holding manual target allocations.")
-                        if st.session_state.saved_manual_targets.get(selected_portfolio):
-                             manual_map = st.session_state.saved_manual_targets[selected_portfolio]
-                             if len(st.session_state.stocks) >= 3:
-                                 for i in range(3):
-                                     s_name = st.session_state.stocks[i]['name']
-                                     if s_name in manual_map:
-                                         restored_val = manual_map[s_name]
-                                         st.session_state.stocks[i]['target_allocation'] = restored_val
-                                         widget_key = f"{selected_portfolio}_{i}_target"
-                                         st.session_state[widget_key] = restored_val
                 else:
-                     buffett_index = 223.73
-                     cape_ratio = 39.42
+                     buffett_index = 195.0
                      
                      current_targets_map = {}
                      for _, row in user_portfolio_df.iterrows():
