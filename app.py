@@ -834,7 +834,12 @@ elif authentication_status:
             with st.container(border=True):
                 st.subheader("📋 Investment Recommendations")
                 df = st.session_state.last_calculation['df']
-                st.dataframe(df.style.format(precision=2), hide_index=True, use_container_width=True)
+                # Highlight and style the 'Investment' column
+                styled_df = df.style.format(precision=2).set_properties(
+                    subset=['Investment'], 
+                    **{'background-color': '#D1FAE5', 'color': '#065F46', 'font-weight': '700'}
+                )
+                st.dataframe(styled_df, hide_index=True, use_container_width=True)
                 
                 if st.button("💾 Log to History", width="stretch"):
                     with st.spinner("Logging..."):
