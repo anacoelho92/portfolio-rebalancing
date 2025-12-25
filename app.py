@@ -1023,7 +1023,7 @@ elif authentication_status:
                         st.session_state.show_recommendations = True
                 
                 if st.session_state.show_recommendations:
-                    st.divider()
+                    # st.divider()
                     calc = st.session_state.last_calculation
                     if calc['remaining'] > 0.01:
                         st.warning(f"Note: €{calc['remaining']:.2f} could not be allocated.")
@@ -1037,8 +1037,8 @@ elif authentication_status:
                 # Highlight and style the 'Investment' column
                 styled_df = df.style.format(precision=2).set_properties(
                     subset=['Investment'], 
-                    **{'background-color': '#6EE7B7', 'color': '#065F46', 'font-weight': '700', 
-                       'border-bottom': '1px solid #0D9488'}
+                    **{'background-color': '#24A16F', 'color': '#065F46', 'font-weight': '700', 
+                       'border-bottom': '1px solid #065F46'}
                 )
                 st.table(styled_df)
                 
