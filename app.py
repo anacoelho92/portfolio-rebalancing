@@ -1288,10 +1288,26 @@ elif authentication_status:
                                  st.info(f"No dividends found for {current_year-1} or {current_year}.")
                              else:
                                  my_divs['Year'] = my_divs['date'].dt.year.astype(str)
+                             
+                             # Calculate Yearly Totals
+                             current_year_str = str(current_year)
+                             prev_year_str = str(current_year - 1)
+                             
+                             total_current_year = my_divs[my_divs['Year'] == current_year_str]['amount'].sum()
+                             total_prev_year = my_divs[my_divs['Year'] == prev_year_str]['amount'].sum()
+                             
+                             # Display Totals Side-by-Side
+                             metric_col1, metric_col2 = st.columns(2)
+                             with metric_col1:
+                                 st.metric(label=f"💰 Total Dividends ({current_year})", value=f"€{total_current_year:,.2f}")
+                             with metric_col2:
+                                 st.metric(label=f"💰 Total Dividends ({current_year-1})", value=f"€{total_prev_year:,.2f}")
+                             
                              my_divs['Month'] = my_divs['date'].dt.strftime('%B')
                              my_divs['MonthNum'] = my_divs['date'].dt.month
                              monthly_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index().sort_values('MonthNum')
-                             fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', title="Dividends Received (Yearly Comparison)", labels={'amount': 'Amount (€)', 'Month': 'Month'})
+                             fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', title="Dividends Received (Yearly Comparison)", labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
+                             fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside')
                              fig_div.update_layout(font=dict(size=14), margin=dict(t=50, b=50, l=50, r=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                              st.plotly_chart(fig_div, use_container_width=True)
                              with st.expander("Dividend History"):
