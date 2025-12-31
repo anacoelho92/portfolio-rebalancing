@@ -1308,7 +1308,13 @@ elif authentication_status:
                              monthly_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index().sort_values('MonthNum')
                              fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', title="Dividends Received (Yearly Comparison)", labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
                              fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside')
-                             fig_div.update_layout(font=dict(size=14), margin=dict(t=50, b=50, l=50, r=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                             fig_div.update_layout(
+                                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                 font=dict(size=14), 
+                                 margin=dict(t=50, b=50, l=10, r=10), 
+                                 paper_bgcolor='rgba(0,0,0,0)', 
+                                 plot_bgcolor='rgba(0,0,0,0)'
+                             )
                              st.plotly_chart(fig_div, use_container_width=True)
                              with st.expander("Dividend History"):
                                  st.dataframe(my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False), use_container_width=True)
