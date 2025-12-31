@@ -748,6 +748,7 @@ elif authentication_status:
                 monthly_investment = st.number_input(
                     "Monthly Investment Amount (€)",
                     min_value=0.0,
+                    value=st.session_state.get(monthly_investment_key, 1000.0),
                     key=monthly_investment_key,
                     step=100.0,
                     help="Amount you want to invest this month",
