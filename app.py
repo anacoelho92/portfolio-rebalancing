@@ -1034,7 +1034,7 @@ elif authentication_status:
                     
                     # Then create new rows from edited_df
                     new_rows = []
-                    for _, row in edited_df.iterrows():
+                    for _, row in edited_df.reset_index().iterrows():
                         if row['name'] and row['name'] != "__PLACEHOLDER__":
                              new_rows.append({
                                 "username": username,
@@ -1069,8 +1069,10 @@ elif authentication_status:
                     st.session_state.show_save_success = True
                     st.rerun()
                     
-                    if st.session_state.get('show_save_success'):
-                        st.success("All changes saved successfully!")
+                if st.session_state.get('show_save_success'):
+                    st.success("All changes saved successfully!")
+                    # Reset flag so it doesn't persist on next interactions
+                    st.session_state.show_save_success = False
 
         with col_side:
             with st.container(border=True):
@@ -1187,7 +1189,7 @@ elif authentication_status:
                 dashboard_colors = ['#FF8B76', '#7BD192', '#5EB1FF', '#FFD166', '#06D6A0']
                 
                 # Mobile Optimization: Place legend horizontal (top/bottom) to save width
-                common_legend = dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                common_legend = dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
                 
                 with chart_col1:
                     fig1 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['Current Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
@@ -1196,7 +1198,7 @@ elif authentication_status:
                         title_font=dict(size=20), 
                         legend=common_legend,
                         font=dict(size=14),
-                        margin=dict(t=50, b=10, l=10, r=10),
+                        margin=dict(t=80, b=80, l=10, r=10),
                         paper_bgcolor='rgba(0,0,0,0)', 
                         plot_bgcolor='rgba(0,0,0,0)'
                     )
@@ -1208,7 +1210,7 @@ elif authentication_status:
                         title_font=dict(size=20), 
                         legend=common_legend,
                         font=dict(size=14),
-                        margin=dict(t=50, b=10, l=10, r=10),
+                        margin=dict(t=80, b=80, l=10, r=10),
                         paper_bgcolor='rgba(0,0,0,0)', 
                         plot_bgcolor='rgba(0,0,0,0)'
                     )
