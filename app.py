@@ -1343,6 +1343,16 @@ elif authentication_status:
                                  st.info(f"No dividends found for {current_year-1} or {current_year}.")
                              else:
                                  my_divs['Year'] = my_divs['date'].dt.year.astype(str)
+                                 
+                                 # Ticker Filter
+                                 available_tickers = sorted(my_divs['ticker'].unique().tolist())
+                                 filter_ticker = st.selectbox("🔍 Filter by Ticker", options=["All Data"] + available_tickers)
+                                 
+                                 if filter_ticker != "All Data":
+                                     my_divs = my_divs[my_divs['ticker'] == filter_ticker]
+                                     if my_divs.empty:
+                                         st.warning(f"No data for {filter_ticker} in the selected period.")
+                                         st.stop()
                              
                              # Calculate Yearly Totals
                              current_year_str = str(current_year)
@@ -1360,7 +1370,26 @@ elif authentication_status:
                              
                              my_divs['Month'] = my_divs['date'].dt.strftime('%b')
                              my_divs['MonthNum'] = my_divs['date'].dt.month
-                             monthly_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index().sort_values('MonthNum')
+                             
+                             # Aggregated stats
+                             actual_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index()
+                             
+                             # Create a template for all 12 months for BOTH years to ensure a full X-axis
+                             import calendar
+                             all_months = [calendar.month_name[i][:3] for i in range(1, 13)] # ['Jan', 'Feb', ...]
+                             
+                             template_rows = []
+                             for yr in [str(current_year), str(current_year-1)]:
+                                 for i, m in enumerate(all_months):
+                                     template_rows.append({'Year': yr, 'Month': m, 'MonthNum': i+1})
+                             
+                             template_df = pd.DataFrame(template_rows)
+                             
+                             # Merge actual data into template
+                             monthly_stats = pd.merge(template_df, actual_stats, on=['Year', 'Month', 'MonthNum'], how='left').fillna(0.0)
+                             
+                             # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
+                             monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
                              
                              st.markdown("**Dividends Received (Yearly Comparison)**")
                              fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
