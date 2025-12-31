@@ -1221,8 +1221,32 @@ elif authentication_status:
                                 except: existing_history = pd.DataFrame()
                                 new_history = pd.concat([existing_history, log_df], ignore_index=True) if existing_history is not None and not existing_history.empty else log_df
                                 conn.update(worksheet="InvestmentLog", data=new_history)
-                                st.success("Logged!")
+
+                                # --- APPLY NEW VALUES TO PORTFOLIO ---
+                                master_data = st.session_state.master_data.copy()
+                                # Update master_data with New Value for each stock in the current portfolio
+                                for _, row in df.iterrows():
+                                    stock_ticker = row['Stock']
+                                    new_val = row['New Value']
+                                    
+                                    mask = (master_data['username'] == username) & \
+                                           (master_data['portfolio_name'] == selected_portfolio) & \
+                                           (master_data['stock_name'] == stock_ticker)
+                                    
+                                    if mask.any():
+                                        master_data.loc[mask, 'current_value'] = new_val
+                                
+                                # Push updated Portfolio data back to GSheets
+                                conn.update(worksheet="Portfolios", data=master_data)
+                                st.session_state.master_data = master_data
+                                
+                                st.success("Logged & Portfolio Updated!")
                                 st.balloons()
+                                
+                                # Force re-sync of local state so the table reflects the new values
+                                if 'last_selected_portfolio' in st.session_state:
+                                    del st.session_state.last_selected_portfolio
+                                st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
     
                 # Charts Row
