@@ -553,7 +553,7 @@ elif authentication_status:
             
             required_columns = [
                 'username', 'stock_name', 'current_value', 'target_allocation', 
-                'portfolio_name', 'tolerance', 'portfolio_monthly_invest', 
+                'portfolio_name', 'tolerance', 'expense_ratio', 'portfolio_monthly_invest', 
                 'portfolio_use_indicators', 'portfolio_buffett_index'
             ]
             
@@ -565,7 +565,7 @@ elif authentication_status:
                         if col == 'portfolio_monthly_invest': raw_data[col] = 1000.0
                         elif col == 'portfolio_use_indicators': raw_data[col] = False
                         elif col == 'portfolio_buffett_index': raw_data[col] = 195.0
-                        elif col in ['current_value', 'target_allocation', 'tolerance']: raw_data[col] = 0.0
+                        elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio']: raw_data[col] = 0.0
                         else: raw_data[col] = ''
                         
                 raw_data = raw_data.astype({
@@ -573,6 +573,7 @@ elif authentication_status:
                     'stock_name': 'str', 
                     'current_value': 'float',
                     'target_allocation': 'float',
+                    'expense_ratio': 'float',
                     'portfolio_name': 'str'
                 })
                 raw_data['portfolio_name'] = raw_data['portfolio_name'].fillna('Default')
@@ -725,7 +726,8 @@ elif authentication_status:
             "name": row['stock_name'],
             "current_value": row['current_value'],
             "target_allocation": row['target_allocation'],
-            "tolerance": row.get('tolerance', 0.0)
+            "tolerance": row.get('tolerance', 0.0),
+            "expense_ratio": row.get('expense_ratio', 0.0)
         })
     
     # We store the original values for change detection
@@ -760,6 +762,7 @@ elif authentication_status:
             # 2. Configuration Section
             with st.expander("⚙️ Configuration", expanded=False):
                 monthly_investment_key = f"{selected_portfolio}_monthly_invest"
+                
                 monthly_investment = st.number_input(
                     "Monthly Investment Amount (€)",
                     min_value=0.0,
@@ -869,6 +872,7 @@ elif authentication_status:
                 new_value = st.number_input("Current Value (€)", min_value=0.0, value=0.0, key="new_value")
                 new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
                 new_tolerance = st.number_input("Rebalancing Tolerance (%)", min_value=0.0, max_value=20.0, value=0.0, key="new_tolerance", help="Don't rebalance if drift is less/more than this %")
+                new_ter = st.number_input("Expense Ratio (TER %)", min_value=0.0, max_value=5.0, value=0.0, step=0.01, key="new_ter")
                 
                 if st.button("Add Stock"):
                     if new_name:
@@ -883,6 +887,7 @@ elif authentication_status:
                             "current_value": new_value,
                             "target_allocation": new_target,
                             "tolerance": new_tolerance,
+                            "expense_ratio": new_ter,
                             "portfolio_name": selected_portfolio,
                             "portfolio_monthly_invest": p_invest,
                             "portfolio_use_indicators": p_use_ind,
@@ -921,7 +926,8 @@ elif authentication_status:
             live_stocks.append({
                 "name": st.session_state.get(f"{key_prefix}_name", stock['name']),
                 "current_value": st.session_state.get(f"{key_prefix}_value", stock['current_value']),
-                "target_allocation": st.session_state.get(f"{key_prefix}_target", stock['target_allocation'])
+                "target_allocation": st.session_state.get(f"{key_prefix}_target", stock['target_allocation']),
+                "expense_ratio": stock.get('expense_ratio', 0.0)
             })
 
         # --- Top Row: KPI Cards ---
@@ -932,11 +938,16 @@ elif authentication_status:
         # Dashboard Header
         st.markdown(f"## 📊 {selected_portfolio} Dashboard")
         
-        kpi_cols = st.columns(4)
+        # Calculate Weighted TER for KPI
+        total_ter_sum = sum(s['current_value'] * s['expense_ratio'] for s in live_stocks)
+        weighted_ter = (total_ter_sum / total_current) if total_current > 0 else 0.0
+
+        kpi_cols = st.columns(5)
         with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
         with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
         with kpi_cols[2]: render_kpi_card("Target Spread", f"{total_target:.1f}%")
-        with kpi_cols[3]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
+        with kpi_cols[3]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
+        with kpi_cols[4]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
         
         if abs(total_target - 100.0) > 0.01:
             st.warning("⚠️ Your target allocations do not sum to 100%. Please adjust them in Portfolio Management.")
@@ -956,7 +967,9 @@ elif authentication_status:
                     
                     # Ensure correct columns if empty
                     if current_stocks_df.empty:
-                        current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance"])
+                        current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance", "expense_ratio"])
+                    elif 'expense_ratio' not in current_stocks_df.columns:
+                        current_stocks_df['expense_ratio'] = 0.0
                     
                     # Freeze Ticker by setting as Index
                     current_stocks_df.set_index("name", inplace=True)
@@ -966,7 +979,8 @@ elif authentication_status:
                         "name": st.column_config.TextColumn("Ticker", required=True),
                         "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=100.0, format="%.2f"),
                         "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
-                        "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%")
+                        "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"),
+                        "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                     }
                     
                     edited_df = st.data_editor(
@@ -1061,6 +1075,7 @@ elif authentication_status:
                                     "current_value": row['current_value'],
                                     "target_allocation": row['target_allocation'],
                                     "tolerance": row['tolerance'],
+                                    "expense_ratio": row.get('expense_ratio', 0.0),
                                     "portfolio_monthly_invest": portfolio_invest,
                                     "portfolio_use_indicators": portfolio_use_ind,
                                     "portfolio_buffett_index": portfolio_buffett
