@@ -1103,7 +1103,6 @@ elif authentication_status:
                         
                     if st.session_state.get('show_save_success'):
                         st.success("All changes saved successfully!")
-                        # Reset flag so it doesn't persist on next interactions
                         st.session_state.show_save_success = False
     
             with col_side:
@@ -1240,14 +1239,19 @@ elif authentication_status:
                                 conn.update(worksheet="Portfolios", data=master_data)
                                 st.session_state.master_data = master_data
                                 
-                                st.success("Logged & Portfolio Updated!")
-                                st.balloons()
+                                st.session_state.show_log_success = True
                                 
                                 # Force re-sync of local state so the table reflects the new values
                                 if 'last_selected_portfolio' in st.session_state:
                                     del st.session_state.last_selected_portfolio
                                 st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
+                    
+                    if st.session_state.get('show_log_success'):
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        st.success("Logged & Portfolio Updated!")
+                        st.balloons()
+                        st.session_state.show_log_success = False
     
                 # Charts Row
                 with st.container(border=True):
