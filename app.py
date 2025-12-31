@@ -460,6 +460,12 @@ if 'last_calculation' not in st.session_state:
     st.session_state.last_calculation = None
 if 'show_save_success' not in st.session_state:
     st.session_state.show_save_success = False
+if 'undo_buffer' not in st.session_state:
+    st.session_state.undo_buffer = []
+if 'show_undo' not in st.session_state:
+    st.session_state.show_undo = False
+if 'editor_key' not in st.session_state:
+    st.session_state.editor_key = 0
 
 def clear_recommendations():
     st.session_state.show_recommendations = False
@@ -926,92 +932,137 @@ elif authentication_status:
             with st.container(border=True):
                 st.subheader("📝 Portfolio Management")
                 
-                if not st.session_state.stocks or (len(st.session_state.stocks) == 1 and st.session_state.stocks[0]['name'] == "__PLACEHOLDER__"):
-                    st.info("This portfolio is empty. Add stocks using the sidebar!", icon="👈")
-                else:
-                    # Headers
-                    h_cols = st.columns([3, 2, 2, 2, 1])
-                    h_cols[0].markdown("**Ticker**")
-                    h_cols[1].markdown("**Value (€)**")
-                    h_cols[2].markdown("**Target %**")
-                    h_cols[3].markdown("**Tolerance %**")
+                # Prepare data for Editor
+                current_stocks_df = pd.DataFrame(st.session_state.stocks)
+                
+                # Ensure correct columns if empty
+                if current_stocks_df.empty:
+                    current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance"])
+                
+                # Configuration for Data Editor
+                column_config = {
+                    "name": st.column_config.TextColumn("Ticker", required=True),
+                    "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=100.0, format="%.2f"),
+                    "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
+                    "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%")
+                }
+                
+                edited_df = st.data_editor(
+                    current_stocks_df,
+                    column_config=column_config,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key=f"portfolio_editor_{st.session_state.editor_key}",
+                    on_change=clear_recommendations
+                )
+                
+                # Sync Editor Changes to Session State immediately for "Live Calc"
+                # This ensures charts and calculations use the latest typed values even before saving
+                if not edited_df.equals(current_stocks_df):
+                    # DETECT DELETIONS
+                    updated_stocks = edited_df.to_dict('records')
+                    old_stocks = current_stocks_df.to_dict('records')
 
-                    for idx, stock in enumerate(st.session_state.stocks):
-                        if stock['name'] == "__PLACEHOLDER__": continue
-                        key_prefix = f"{selected_portfolio}_{idx}"
-                        r_cols = st.columns([3, 2, 2, 2, 1], vertical_alignment="center")
-                        with r_cols[0]:
-                            st.text_input("Name", key=f"{key_prefix}_name", label_visibility="collapsed", on_change=clear_recommendations)
-                        with r_cols[1]:
-                            st.number_input("Value", min_value=0.0, step=100.0, key=f"{key_prefix}_value", label_visibility="collapsed", on_change=clear_recommendations)
-                        with r_cols[2]:
-                            st.number_input("Target", min_value=0.0, max_value=100.0, step=1.0, key=f"{key_prefix}_target", label_visibility="collapsed", on_change=clear_recommendations)
-                        with r_cols[3]:
-                            st.number_input("Tolerance", min_value=0.0, max_value=20.0, step=0.1, key=f"{key_prefix}_tolerance", label_visibility="collapsed", on_change=clear_recommendations)
-                        with r_cols[4]:
-                            if st.button("❌", key=f"{key_prefix}_remove"):
-                                filtered_idx = user_portfolio_df.index[idx]
-                                remaining_in_portfolio = user_portfolio_df.drop(filtered_idx)
-                                if remaining_in_portfolio.empty:
-                                    placeholder_row = pd.DataFrame([{"username": username, "portfolio_name": selected_portfolio, "stock_name": "__PLACEHOLDER__", "current_value": 0.0, "target_allocation": 0.0}])
-                                    updated_data = pd.concat([data.drop(filtered_idx), placeholder_row], ignore_index=True)
-                                else:
-                                    updated_data = data.drop(filtered_idx)
-                                st.session_state.master_data = updated_data
-                                st.session_state.has_unsaved_changes = True
-                                reset_portfolio_state()
-                                st.rerun()
-
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("💾 Save All Changes", width="stretch"):
-                        any_content_changes = False
-                        # Always update configuration for the selected portfolio across all its rows
-                        portfolio_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
-                        portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
-                        portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
-
-                        # Update configuration in 'data' for all rows matching this portfolio
-                        # This ensures the configuration is "broadcasted" to all rows
-                        mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
-                        data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
-                        data.loc[mask, 'portfolio_use_indicators'] = portfolio_use_ind
-                        data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
-
-                        # Check for stock-level changes
-                        for idx, stock in enumerate(st.session_state.stocks):
-                            key_prefix = f"{selected_portfolio}_{idx}"
-                            new_name = st.session_state.get(f"{key_prefix}_name")
-                            new_val = st.session_state.get(f"{key_prefix}_value")
-                            new_target = st.session_state.get(f"{key_prefix}_target")
-                            new_tolerance = st.session_state.get(f"{key_prefix}_tolerance")
-                            orig_row = user_portfolio_df.iloc[idx]
-
-                            if (new_name != orig_row['stock_name'] or 
-                                abs(new_val - orig_row['current_value']) > 0.01 or 
-                                abs(new_target - orig_row['target_allocation']) > 0.01 or
-                                abs(new_tolerance - orig_row.get('tolerance', 0.0)) > 0.01):
-                                filtered_idx = user_portfolio_df.index[idx]
-                                data.at[filtered_idx, 'stock_name'] = new_name
-                                data.at[filtered_idx, 'current_value'] = new_val
-                                data.at[filtered_idx, 'target_allocation'] = new_target
-                                data.at[filtered_idx, 'tolerance'] = new_tolerance
-                                any_content_changes = True
+                    if len(updated_stocks) < len(old_stocks):
+                        # Row(s) were deleted
+                        # Identify exactly which ones are missing based on 'name' (assuming unique names)
+                        updated_names = {row['name'] for row in updated_stocks}
+                        deleted_items = [row for row in old_stocks if row['name'] not in updated_names]
                         
-                        # Configuration changes also count as changes
-                        # We compare against the first row of user_portfolio_df
-                        if not user_portfolio_df.empty:
-                            fr = user_portfolio_df.iloc[0]
-                            if (abs(portfolio_invest - fr.get('portfolio_monthly_invest', 1000.0)) > 0.1 or
-                                portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
-                                abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
-                                any_content_changes = True
+                        st.session_state.undo_buffer = deleted_items
+                        st.session_state.show_undo = True
+                        st.toast(f"Deleted {len(deleted_items)} stock(s)", icon="🗑️")
+                    elif len(updated_stocks) >= len(old_stocks):
+                        # Add or Edit action -> Clear undo history to avoid confusion
+                        st.session_state.show_undo = False
+                        st.session_state.undo_buffer = []
 
-                        if any_content_changes or st.session_state.has_unsaved_changes:
-                            st.session_state.master_data = data
-                            conn.update(worksheet="Portfolios", data=data)
-                            st.session_state.has_unsaved_changes = False
-                            st.session_state.show_save_success = True
+                    st.session_state.stocks = updated_stocks
+
+                # UNDO BUTTON
+                if st.session_state.show_undo:
+                    if st.button("↩️ Undo Delete"):
+                        if st.session_state.undo_buffer:
+                            # Restore deleted items
+                            st.session_state.stocks.extend(st.session_state.undo_buffer)
+                            st.session_state.undo_buffer = []
+                            st.session_state.show_undo = False
+                            
+                            # CRITICAL FIX (Robust): Increment key to force total widget recreation
+                            # This bypasses any internal state that Streamlit/BaseWeb might be holding onto
+                            st.session_state.editor_key += 1
+                                
+                            st.toast("Restored deleted stocks!", icon="✅")
                             st.rerun()
+
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Save Logic
+                if st.button("💾 Save All Changes", width="stretch"):
+                    any_content_changes = False
+                    
+                    # 1. Update Portfolio-Level Config (Broadcast)
+                    portfolio_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
+                    portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
+                    portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
+
+                    mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                    
+                    # Check for Config Changes
+                    if not user_portfolio_df.empty:
+                        fr = user_portfolio_df.iloc[0]
+                        if (abs(portfolio_invest - fr.get('portfolio_monthly_invest', 1000.0)) > 0.1 or
+                            portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
+                            abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
+                            any_content_changes = True
+                            data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
+                            data.loc[mask, 'portfolio_use_indicators'] = portfolio_use_ind
+                            data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
+                    
+                    # 2. Update Stock Data (Refactored for Data Editor)
+                    # We rebuild the rows for this portfolio entirely from the edited_df
+                    # This handles Adds, Edits, and Deletes implicitly
+                    
+                    # First, drop all existing rows for this portfolio
+                    data = data[~mask]
+                    
+                    # Then create new rows from edited_df
+                    new_rows = []
+                    for _, row in edited_df.iterrows():
+                        if row['name'] and row['name'] != "__PLACEHOLDER__":
+                             new_rows.append({
+                                "username": username,
+                                "portfolio_name": selected_portfolio,
+                                "stock_name": row['name'],
+                                "current_value": row['current_value'],
+                                "target_allocation": row['target_allocation'],
+                                "tolerance": row['tolerance'],
+                                "portfolio_monthly_invest": portfolio_invest,
+                                "portfolio_use_indicators": portfolio_use_ind,
+                                "portfolio_buffett_index": portfolio_buffett
+                            })
+                    
+                    if not new_rows:
+                        # If empty, add placeholder to keep portfolio alive
+                         new_rows.append({
+                            "username": username,
+                            "portfolio_name": selected_portfolio,
+                            "stock_name": "__PLACEHOLDER__",
+                            "current_value": 0.0,
+                            "target_allocation": 0.0,
+                             "portfolio_monthly_invest": portfolio_invest,
+                            "portfolio_use_indicators": portfolio_use_ind,
+                            "portfolio_buffett_index": portfolio_buffett
+                        })
+                    
+                    updated_data = pd.concat([data, pd.DataFrame(new_rows)], ignore_index=True)
+                    st.session_state.master_data = updated_data
+                    conn.update(worksheet="Portfolios", data=updated_data)
+                    
+                    st.session_state.has_unsaved_changes = False
+                    st.session_state.show_save_success = True
+                    st.rerun()
                     
                     if st.session_state.get('show_save_success'):
                         st.success("All changes saved successfully!")
@@ -1020,33 +1071,29 @@ elif authentication_status:
             with st.container(border=True):
                 st.subheader("🎯 Action Center")
                 if st.button("🧮 Calculate Allocation", width="stretch"):
-                    if abs(sum(s['target_allocation'] for s in live_stocks) - 100.0) > 0.01:
-                        st.error("Ratios must sum to 100%")
+                    live_stocks = st.session_state.stocks # Use the updated state
+                    total_current_live = sum(s['current_value'] for s in live_stocks)
+                    total_target_live = sum(s['target_allocation'] for s in live_stocks)
+
+                    if abs(total_target_live - 100.0) > 0.01:
+                        st.error(f"Ratios sum to {total_target_live:.1f}%, must be 100%")
                     else:
-                        total_current = sum(s['current_value'] for s in live_stocks)
-                        new_total_theoretical = total_current + monthly_investment
+                        # ... (Calculation Logic reused) ...
+                        new_total_theoretical = total_current_live + monthly_investment
                         
                         eligible_stocks = []
                         for stock in live_stocks:
-                            current_pct = (stock['current_value'] / total_current * 100) if total_current > 0 else 0
+                            current_pct = (stock['current_value'] / total_current_live * 100) if total_current_live > 0 else 0
                             target_pct = stock['target_allocation']
                             tolerance = stock.get('tolerance', 0.0)
-                            
-                            # Tolerance Rule: Only invest if current % is below (target % - tolerance %)
-                            # OR if the stock is brand new (current value is 0)
                             if stock['current_value'] == 0 or current_pct < (target_pct - tolerance):
                                 eligible_stocks.append(stock)
                         
                         if not eligible_stocks:
                             st.warning("All stocks are within their tolerance bands! No rebalancing needed.")
-                            # Fallback: Treat all as eligible if they all passed the check but we still want to invest?
-                            # No, let's respect the user's tolerance. If they forced it, we could have a toggle.
-                            # For now, let's just use live_stocks if everything is skipped to avoid "0 results".
                             eligible_stocks = live_stocks 
 
                         stock_gaps = []
-                        # Recalculate gaps only for eligible stocks (or all if fallback triggered)
-                        # We use the full new_total_theoretical to find the 'true' gap
                         for stock in eligible_stocks:
                             target_val = new_total_theoretical * (stock['target_allocation'] / 100.0)
                             gap = target_val - stock['current_value']
@@ -1068,7 +1115,7 @@ elif authentication_status:
                             remaining_investment = 0.0 
                         
                         allocations = []
-                        new_total_actual = float(total_current + monthly_investment)
+                        new_total_actual = float(total_current_live + monthly_investment)
                         for row in temp_allocs:
                             item = row['item']
                             final_invest = row['invest']
@@ -1077,7 +1124,7 @@ elif authentication_status:
                             allocations.append({
                                 "Stock": item['Stock'], 
                                 "Current Value": stock['current_value'], 
-                                "Current %": (stock['current_value'] / total_current * 100) if total_current > 0 else 0, 
+                                "Current %": (stock['current_value'] / total_current_live * 100) if total_current_live > 0 else 0, 
                                 "Target %": stock['target_allocation'], 
                                 "Target Value": item['Target Value'],
                                 "Investment": final_invest, 
@@ -1106,7 +1153,8 @@ elif authentication_status:
                     **{'background-color': '#24A16F', 'color': '#065F46', 'font-weight': '700', 
                        'border-bottom': '1px solid #065F46'}
                 )
-                st.table(styled_df)
+                # Use st.dataframe for responsive horizontal scrolling
+                st.dataframe(styled_df, use_container_width=True)
                 
                 if st.button("💾 Log to History", width="stretch"):
                     with st.spinner("Logging..."):
@@ -1133,13 +1181,17 @@ elif authentication_status:
                 
                 dashboard_colors = ['#FF8B76', '#7BD192', '#5EB1FF', '#FFD166', '#06D6A0']
                 
+                # Mobile Optimization: Place legend horizontal (top/bottom) to save width
+                common_legend = dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                
                 with chart_col1:
                     fig1 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['Current Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
                     fig1.update_layout(
                         title_text="Current Allocation", 
-                        title_font=dict(size=24), 
-                        legend=dict(font=dict(size=18)),
-                        font=dict(size=16), # Global font size for labels
+                        title_font=dict(size=20), 
+                        legend=common_legend,
+                        font=dict(size=14),
+                        margin=dict(t=50, b=10, l=10, r=10),
                         paper_bgcolor='rgba(0,0,0,0)', 
                         plot_bgcolor='rgba(0,0,0,0)'
                     )
@@ -1148,9 +1200,10 @@ elif authentication_status:
                     fig2 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['New Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
                     fig2.update_layout(
                         title_text="After Investment", 
-                        title_font=dict(size=24), 
-                        legend=dict(font=dict(size=18)),
-                        font=dict(size=16), # Global font size for labels
+                        title_font=dict(size=20), 
+                        legend=common_legend,
+                        font=dict(size=14),
+                        margin=dict(t=50, b=10, l=10, r=10),
                         paper_bgcolor='rgba(0,0,0,0)', 
                         plot_bgcolor='rgba(0,0,0,0)'
                     )
