@@ -1303,19 +1303,21 @@ elif authentication_status:
                              with metric_col2:
                                  st.metric(label=f"💰 Total Dividends ({current_year-1})", value=f"€{total_prev_year:,.2f}")
                              
-                             my_divs['Month'] = my_divs['date'].dt.strftime('%B')
+                             my_divs['Month'] = my_divs['date'].dt.strftime('%b')
                              my_divs['MonthNum'] = my_divs['date'].dt.month
                              monthly_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index().sort_values('MonthNum')
-                             fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', title="Dividends Received (Yearly Comparison)", labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
-                             fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside')
+                             
+                             st.markdown("**Dividends Received (Yearly Comparison)**")
+                             fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
+                             fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=16)
                              fig_div.update_layout(
                                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                                 font=dict(size=14), 
-                                 margin=dict(t=50, b=50, l=10, r=10), 
+                                 font=dict(size=16), 
+                                 margin=dict(t=10, b=50, l=10, r=10), 
                                  paper_bgcolor='rgba(0,0,0,0)', 
                                  plot_bgcolor='rgba(0,0,0,0)'
                              )
-                             st.plotly_chart(fig_div, use_container_width=True)
+                             st.plotly_chart(fig_div, use_container_width=True, config={'displayModeBar': False})
                              with st.expander("Dividend History"):
                                  st.dataframe(my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False), use_container_width=True)
                          else:
