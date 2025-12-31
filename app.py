@@ -939,6 +939,9 @@ elif authentication_status:
                 if current_stocks_df.empty:
                     current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance"])
                 
+                # Freeze Ticker by setting as Index
+                current_stocks_df.set_index("name", inplace=True)
+                
                 # Configuration for Data Editor
                 column_config = {
                     "name": st.column_config.TextColumn("Ticker", required=True),
@@ -960,8 +963,9 @@ elif authentication_status:
                 # This ensures charts and calculations use the latest typed values even before saving
                 if not edited_df.equals(current_stocks_df):
                     # DETECT DELETIONS
-                    updated_stocks = edited_df.to_dict('records')
-                    old_stocks = current_stocks_df.to_dict('records')
+                    # Must reset index to get 'name' back into the columns for to_dict('records')
+                    updated_stocks = edited_df.reset_index().to_dict('records')
+                    old_stocks = current_stocks_df.reset_index().to_dict('records')
 
                     if len(updated_stocks) < len(old_stocks):
                         # Row(s) were deleted
@@ -1147,8 +1151,8 @@ elif authentication_status:
             with st.container(border=True):
                 st.subheader("📋 Investment Recommendations")
                 df = st.session_state.last_calculation['df']
-                # Highlight and style the 'Investment' column
-                styled_df = df.style.format(precision=2).set_properties(
+                # Highlight and style. Set Index to Stock to freeze column.
+                styled_df = df.set_index("Stock").style.format(precision=2).set_properties(
                     subset=['Investment'], 
                     **{'background-color': '#24A16F', 'color': '#065F46', 'font-weight': '700', 
                        'border-bottom': '1px solid #065F46'}
