@@ -91,10 +91,46 @@ st.markdown("""
     }
 
     /* Fix selection text in sidebar inputs */
-    [data-testid="stSidebar"] div[data-baseweb="select"],
-    [data-testid="stSidebar"] .stTextInput div[data-baseweb="base-input"] {
+    /* Fix selection text in sidebar inputs - Remove contours globally (Aggressive) */
+    /* Fix selection text in sidebar inputs - Remove contours globally (Aggressive) */
+    [data-testid="stSidebar"] input,
+    
+    /* Target various containers to ensure background consistency */
+    [data-testid="stSidebar"] div[data-baseweb="select"] > div,
+    [data-testid="stSidebar"] div[data-testid="stTextInput"] > div,
+    [data-testid="stSidebar"] div[data-testid="stNumberInput"] > div,
+    [data-testid="stSidebar"] div[data-baseweb="input"],
+    [data-testid="stSidebar"] div[data-baseweb="base-input"] {
         background-color: white !important;
         border-radius: 8px !important;
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+        /* Force dark text and caret for visibility on white background */
+        color: #31333F !important;
+        caret-color: #31333F !important;
+    }
+    
+    /* Ensure selection is visible within sidebar inputs */
+    [data-testid="stSidebar"] input::selection {
+        background-color: rgba(46, 204, 113, 0.4) !important; /* Primary accent fade */
+        color: #31333F !important;
+    }
+    
+    /* Target specific inner elements to ensure no internal borders */
+    [data-testid="stSidebar"] .stNumberInput input,
+    [data-testid="stSidebar"] .stTextInput input {
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }
+
+    /* Remove borders from the buttons inside number inputs */
+    [data-testid="stSidebar"] .stNumberInput button {
+        border: none !important;
+        outline: none !important;
+        box-shadow: none !important;
+        border-left: 1px solid transparent !important; 
     }
 
     /* Expander Styling in Sidebar - Align with white inputs for maximum contrast */
@@ -145,11 +181,41 @@ st.markdown("""
         color: var(--text-sidebar) !important;
     }
     
-    /* Target the actual checkbox element using BaseWeb structure */
-    [data-testid="stSidebar"] [data-baseweb="checkbox"] > div {
+    /* Checkbox Styling - Split Approach (Iteration 5) */
+    
+    /* 1. The Container (Label) - Ensure transparent */
+    [data-testid="stSidebar"] label[data-baseweb="checkbox"] {
+        background-color: transparent !important;
+    }
+
+    /* 2. The Visual Box (First Child) - White when unchecked */
+    [data-testid="stSidebar"] label[data-baseweb="checkbox"] > div:first-child {
         background-color: white !important;
-        border: 1px solid rgba(0,0,0,0.3) !important;
+        border: 1px solid #9CA3AF !important;
         border-radius: 3px !important;
+    }
+    
+    /* 3. The Text Label (Last Child) - Transparent */
+    [data-testid="stSidebar"] label[data-baseweb="checkbox"] > div:last-child {
+        background-color: transparent !important;
+        color: var(--text-sidebar) !important;
+    }
+
+    /* 4. CHECKED State for the Box Only */
+    [data-testid="stSidebar"] label[data-baseweb="checkbox"] > div:first-child[aria-checked="true"],
+    [data-testid="stSidebar"] [data-baseweb="checkbox"][aria-checked="true"] > div:first-child {
+        background-color: var(--primary-accent) !important;
+        border-color: var(--primary-accent) !important;
+    }
+    
+    /* Ensure inner checkmark is visible when checked */
+    [data-testid="stSidebar"] [aria-checked="true"] svg {
+        fill: white !important;
+    }
+    
+    /* Ensure unchecked checkmark is invisible */
+    [data-testid="stSidebar"] [aria-checked="false"] svg {
+        fill: transparent !important;
     }
     
     /* Unchecked checkbox - make inner checkmark SVG invisible (only direct child) */
