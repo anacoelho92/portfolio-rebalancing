@@ -479,6 +479,9 @@ def reset_portfolio_state():
         keys_to_clear = [k for k in st.session_state.keys() if k.startswith(f"{selected}_")]
         for k in keys_to_clear:
             del st.session_state[k]
+    # Force re-sync of stocks state on next run
+    if 'last_selected_portfolio' in st.session_state:
+        del st.session_state.last_selected_portfolio
 
 # Get secrets
 admin_hash = os.getenv('ADMIN_PASSWORD_HASH')
@@ -716,44 +719,39 @@ elif authentication_status:
     user_portfolio_df = user_all_data[user_all_data['portfolio_name'] == selected_portfolio] if selected_portfolio else pd.DataFrame()
     user_portfolio_df = user_portfolio_df[user_portfolio_df['stock_name'] != "__PLACEHOLDER__"] if not user_portfolio_df.empty else pd.DataFrame()
     
-    # Order by Target % (Descending)
+    # Sort by Target % (Descending) for consistent UI
     if not user_portfolio_df.empty:
         user_portfolio_df = user_portfolio_df.sort_values(by='target_allocation', ascending=False)
     
-    current_stocks = []
-    for _, row in user_portfolio_df.iterrows():
-        current_stocks.append({
-            "name": row['stock_name'],
-            "current_value": row['current_value'],
-            "target_allocation": row['target_allocation'],
-            "tolerance": row.get('tolerance', 0.0),
-            "expense_ratio": row.get('expense_ratio', 0.0)
-        })
-    
-    # We store the original values for change detection
-    st.session_state.stocks = current_stocks
+    # Initialize session state for stocks ONLY if portfolio changes or it's first run
+    if st.session_state.get('last_selected_portfolio') != selected_portfolio:
+        current_stocks = []
+        for _, row in user_portfolio_df.iterrows():
+            current_stocks.append({
+                "name": row['stock_name'],
+                "current_value": row['current_value'],
+                "target_allocation": row['target_allocation'],
+                "tolerance": row.get('tolerance', 0.0),
+                "expense_ratio": row.get('expense_ratio', 0.0)
+            })
+        st.session_state.stocks = current_stocks
+        st.session_state.last_selected_portfolio = selected_portfolio
 
-    # Pre-populate session state keys for widgets if they don't exist
-    if selected_portfolio:
-        # Load portfolio-level config from the first row of user_portfolio_df
-        if not user_portfolio_df.empty:
-            first_row = user_portfolio_df.iloc[0]
-            if f"{selected_portfolio}_monthly_invest" not in st.session_state:
+        # Pre-populate session state keys for widgets if they don't exist
+        if selected_portfolio:
+            # Load portfolio-level config from the first row of user_portfolio_df
+            if not user_portfolio_df.empty:
+                first_row = user_portfolio_df.iloc[0]
+                # Note: We use fixed keys for portfolio-level settings
                 st.session_state[f"{selected_portfolio}_monthly_invest"] = float(first_row.get('portfolio_monthly_invest', 1000.0))
-            if f"{selected_portfolio}_use_indicators" not in st.session_state:
                 st.session_state[f"{selected_portfolio}_use_indicators"] = bool(first_row.get('portfolio_use_indicators', False))
-            if f"{selected_portfolio}_buffett_index" not in st.session_state:
                 st.session_state[f"{selected_portfolio}_buffett_index"] = float(first_row.get('portfolio_buffett_index', 195.0))
 
-        for idx, stock in enumerate(current_stocks):
-            key_prefix = f"{selected_portfolio}_{idx}"
-            if f"{key_prefix}_name" not in st.session_state:
+            for idx, stock in enumerate(st.session_state.stocks):
+                key_prefix = f"{selected_portfolio}_{idx}"
                 st.session_state[f"{key_prefix}_name"] = stock['name']
-            if f"{key_prefix}_value" not in st.session_state:
                 st.session_state[f"{key_prefix}_value"] = float(stock['current_value'])
-            if f"{key_prefix}_target" not in st.session_state:
                 st.session_state[f"{key_prefix}_target"] = float(stock['target_allocation'])
-            if f"{key_prefix}_tolerance" not in st.session_state:
                 st.session_state[f"{key_prefix}_tolerance"] = float(stock.get('tolerance', 0.0))
 
     # Sidebar utilities (Configuration and Indicators)
@@ -917,18 +915,9 @@ elif authentication_status:
 
     # Main content
     if selected_portfolio:
-        # --- Live Calculation Logic ---
         # Synchronize "live" values for calculations (Summary/Recommendations) 
-        # using current widget state before saving to GSheets.
-        live_stocks = []
-        for idx, stock in enumerate(st.session_state.stocks):
-            key_prefix = f"{selected_portfolio}_{idx}"
-            live_stocks.append({
-                "name": st.session_state.get(f"{key_prefix}_name", stock['name']),
-                "current_value": st.session_state.get(f"{key_prefix}_value", stock['current_value']),
-                "target_allocation": st.session_state.get(f"{key_prefix}_target", stock['target_allocation']),
-                "expense_ratio": stock.get('expense_ratio', 0.0)
-            })
+        # Source of truth is now exclusively st.session_state.stocks (synced with Editor)
+        live_stocks = st.session_state.stocks.copy() if 'stocks' in st.session_state else []
 
         # --- Top Row: KPI Cards ---
         total_current = sum(s['current_value'] for s in live_stocks)
@@ -939,7 +928,15 @@ elif authentication_status:
         st.markdown(f"## 📊 {selected_portfolio} Dashboard")
         
         # Calculate Weighted TER for KPI
-        total_ter_sum = sum(s['current_value'] * s['expense_ratio'] for s in live_stocks)
+        total_ter_sum = 0.0
+        for s in live_stocks:
+            try:
+                val = float(s.get('current_value', 0.0))
+                ter = float(s.get('expense_ratio', 0.0))
+                total_ter_sum += (val * ter)
+            except (ValueError, TypeError):
+                continue
+                
         weighted_ter = (total_ter_sum / total_current) if total_current > 0 else 0.0
 
         kpi_cols = st.columns(5)
@@ -1015,6 +1012,8 @@ elif authentication_status:
                             st.session_state.undo_buffer = []
     
                         st.session_state.stocks = updated_stocks
+                        # Aggressive sync: Rerun ensures Dashboard KPIs and other blocks see the new state immediately
+                        st.rerun()
     
                     # UNDO BUTTON
                     if st.session_state.show_undo:
@@ -1123,10 +1122,12 @@ elif authentication_status:
                             
                             eligible_stocks = []
                             for stock in live_stocks:
-                                current_pct = (stock['current_value'] / total_current_live * 100) if total_current_live > 0 else 0
-                                target_pct = stock['target_allocation']
-                                tolerance = stock.get('tolerance', 0.0)
-                                if stock['current_value'] == 0 or current_pct < (target_pct - tolerance):
+                                # A stock is eligible if its CURRENT value is less than its post-investment TARGET value (considering tolerance)
+                                # Post-investment target = new_total_theoretical * (target_pct / 100)
+                                target_val_theoretical = new_total_theoretical * (stock['target_allocation'] / 100.0)
+                                tolerance_buffer = new_total_theoretical * (stock.get('tolerance', 0.0) / 100.0)
+                                
+                                if stock['current_value'] < (target_val_theoretical - tolerance_buffer):
                                     eligible_stocks.append(stock)
                             
                             if not eligible_stocks:
@@ -1154,25 +1155,36 @@ elif authentication_status:
                                 temp_allocs[0]['invest'] += remaining_investment
                                 remaining_investment = 0.0 
                             
+                            # Map investments to tickers
+                            invest_map = {row['item']['Stock']: row['invest'] for row in temp_allocs}
+                            
                             allocations = []
                             new_total_actual = float(total_current_live + monthly_investment)
-                            for row in temp_allocs:
-                                item = row['item']
-                                final_invest = row['invest']
-                                stock = item['stock']
+                            
+                            for stock in live_stocks:
+                                ticker = stock['name']
+                                final_invest = invest_map.get(ticker, 0.0)
+                                target_val = new_total_theoretical * (stock['target_allocation'] / 100.0)
                                 new_val = stock['current_value'] + final_invest
+                                
                                 allocations.append({
-                                    "Stock": item['Stock'], 
+                                    "Stock": ticker, 
                                     "Current Value": stock['current_value'], 
                                     "Current %": (stock['current_value'] / total_current_live * 100) if total_current_live > 0 else 0, 
+                                    "TER %": stock.get('expense_ratio', 0.0),
                                     "Target %": stock['target_allocation'], 
-                                    "Target Value": item['Target Value'],
+                                    "Target Value": target_val,
                                     "Investment": final_invest, 
                                     "New Value": new_val, 
                                     "New %": (new_val / new_total_actual * 100) if new_total_actual > 0 else 0
                                 })
                             
-                            st.session_state.last_calculation = {"df": pd.DataFrame(allocations), "monthly_investment": monthly_investment, "remaining": remaining_investment}
+                            # Sort by Target % (Descending) for consistency with the Management table
+                            alloc_df = pd.DataFrame(allocations)
+                            if not alloc_df.empty:
+                                alloc_df = alloc_df.sort_values(by="Target %", ascending=False)
+
+                            st.session_state.last_calculation = {"df": alloc_df, "monthly_investment": monthly_investment, "remaining": remaining_investment}
                             st.session_state.show_recommendations = True
                     
                     if st.session_state.show_recommendations:
