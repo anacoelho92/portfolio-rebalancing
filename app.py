@@ -534,9 +534,13 @@ elif authentication_status:
         st.divider()
 
     # --- MAIN APP LOGIC STARTS HERE ---
-    st.title("💰 Portfolio Allocation Calculator")
-    st.markdown("Calculate optimal investment amounts to rebalance your portfolio")
+    st.title("🚀 Portfolio Master: Allocation & Analytics")
+    st.markdown("Optimization, Dividend Tracking, and Portfolio Analytics")
 
+    # Initialize dynamic footer message
+    if 'footer_msg' not in st.session_state:
+        st.session_state.footer_msg = "<b>Smart Rebalancing:</b> Maintain your risk profile with disciplined allocation."
+    
     # Initialize GSheets connection
     from streamlit_gsheets import GSheetsConnection
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -1064,6 +1068,7 @@ elif authentication_status:
 
         if "📊 Manage Portfolio" in tab_map:
             with tab_map["📊 Manage Portfolio"]:
+                st.session_state.footer_msg = "<b>Smart Rebalancing:</b> Maintain your risk profile with disciplined allocation."
                 col_main, col_side = st.columns([2, 1])
         
                 with col_main:
@@ -1424,6 +1429,7 @@ elif authentication_status:
 
         if "📈 Portfolio Details" in tab_map:
             with tab_map["📈 Portfolio Details"]:
+                st.session_state.footer_msg = "<b>Data Insight:</b> Visualize your diversification and asset health."
                 with st.container(border=True):
                     st.subheader("📈 Detailed Portfolio Information")
                     
@@ -1701,6 +1707,7 @@ elif authentication_status:
 
         if "💰 Dividend Tracker" in tab_map:
             with tab_map["💰 Dividend Tracker"]:
+                st.session_state.footer_msg = "<b>Passive Income:</b> Track your dividend yields and growth."
                 st.subheader("💰 Dividend Tracker")
                 d_col1, d_col2 = st.columns([1, 2])
                 
@@ -1836,10 +1843,11 @@ elif authentication_status:
             st.markdown('</div>', unsafe_allow_html=True)
 
     # Footer
+    footer_text = st.session_state.get('footer_msg', "Maintain your risk profile with disciplined allocation.")
     st.markdown(
-        """
+        f"""
         <div style='text-align: center; color: #9CA3AF; padding: 20px; font-size: 0.8rem;'>
-        💡 <b>Smart Rebalancing:</b> Maintain your risk profile with disciplined allocation.<br>
+        💡 {footer_text}<br>
         <small>Educational purposes only. Always consult a financial advisor.</small>
         </div>
         """,
