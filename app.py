@@ -12,7 +12,7 @@ from datetime import datetime
 # Load environment variables
 load_dotenv()
 
-st.set_page_config(page_title="Portfolio Allocation Calculator", page_icon="💰", layout="wide")
+st.set_page_config(page_title="Portfolio Master", page_icon="🚀", layout="wide")
 
 # --- Dashboard Redesign Styling ---
 st.markdown("""
