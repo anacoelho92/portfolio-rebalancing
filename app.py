@@ -472,6 +472,30 @@ def clear_recommendations():
     st.session_state.show_save_success = False
     st.session_state.last_calculation = None
 
+def calculate_kids_targets(birth_date_str):
+    if not birth_date_str or not isinstance(birth_date_str, str):
+        return None
+    try:
+        birth_date = datetime.strptime(birth_date_str, "%Y-%m-%d").date()
+        today = datetime.today().date()
+        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+        
+        if age <= 13:
+            return {"VWCE.DE": 100.0, "VAGF.DE": 0.0}
+        elif age == 14:
+            return {"VWCE.DE": 90.0, "VAGF.DE": 10.0}
+        elif age == 15:
+            return {"VWCE.DE": 85.0, "VAGF.DE": 15.0}
+        elif age == 16:
+            return {"VWCE.DE": 80.0, "VAGF.DE": 20.0}
+        elif age == 17:
+            return {"VWCE.DE": 70.0, "VAGF.DE": 30.0}
+        elif age >= 18:
+            return {"VWCE.DE": 60.0, "VAGF.DE": 40.0}
+    except Exception:
+        return None
+    return None
+
 def reset_portfolio_state():
     clear_recommendations()
     if 'portfolio_selector' in st.session_state:
@@ -563,7 +587,8 @@ elif authentication_status:
                 'portfolio_name', 'tolerance', 'expense_ratio', 'portfolio_monthly_invest', 
                 'portfolio_use_indicators', 'portfolio_buffett_index',
                 'stock_full_name', 'sector', 'industry', 'country', 'currency', 
-                'quantity', 'average_price', 'dividend_yield', 'portfolio_type'
+                'quantity', 'average_price', 'dividend_yield', 'portfolio_type',
+                'portfolio_birth_date'
             ]
             
             if raw_data.empty:
@@ -575,6 +600,7 @@ elif authentication_status:
                         elif col == 'portfolio_use_indicators': raw_data[col] = False
                         elif col == 'portfolio_buffett_index': raw_data[col] = 195.0
                         elif col == 'portfolio_type': raw_data[col] = 'Other'
+                        elif col == 'portfolio_birth_date': raw_data[col] = ''
                         elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio', 'quantity', 'average_price', 'dividend_yield']: raw_data[col] = 0.0
                         else: raw_data[col] = ''
                         
@@ -659,7 +685,7 @@ elif authentication_status:
             # Create New Portfolio
             with st.expander("➕ Create New Portfolio"):
                 new_portfolio_input = st.text_input("Name", placeholder="e.g., Retirement", key="new_p_name")
-                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Dividends", "Other"], index=2, key="new_p_type")
+                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Dividends", "Kids", "Other"], index=3, key="new_p_type")
                 if st.button("Create"):
                     if new_portfolio_input and new_portfolio_input not in existing_portfolios:
                         # Create a placeholder row to persist the portfolio name
@@ -669,7 +695,8 @@ elif authentication_status:
                             "stock_name": "__PLACEHOLDER__",
                             "current_value": 0.0,
                             "target_allocation": 0.0,
-                            "portfolio_type": new_portfolio_type
+                            "portfolio_type": new_portfolio_type,
+                            "portfolio_birth_date": ""
                         }])
                         updated_data = pd.concat([data, new_row], ignore_index=True)
                         st.session_state.master_data = updated_data
@@ -687,8 +714,8 @@ elif authentication_status:
                 with st.expander(f"⚙️ Portfolio Settings"):
                     # Get current type for default
                     current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Other"
-                    type_options = ["Stocks", "Dividends", "Other"]
-                    type_index = type_options.index(current_type) if current_type in type_options else 2
+                    type_options = ["Stocks", "Dividends", "Kids", "Other"]
+                    type_index = type_options.index(current_type) if current_type in type_options else 3
 
                     new_name_input = st.text_input("Rename Portfolio", value=selected_portfolio, placeholder="e.g., Retirement 2026")
                     new_type_input = st.selectbox("Portfolio Type", options=type_options, index=type_index)
@@ -793,6 +820,17 @@ elif authentication_status:
                 st.session_state[f"{selected_portfolio}_monthly_invest"] = float(first_row.get('portfolio_monthly_invest', 1000.0))
                 st.session_state[f"{selected_portfolio}_use_indicators"] = bool(first_row.get('portfolio_use_indicators', False))
                 st.session_state[f"{selected_portfolio}_buffett_index"] = float(first_row.get('portfolio_buffett_index', 195.0))
+                st.session_state[f"{selected_portfolio}_birth_date"] = first_row.get('portfolio_birth_date', '')
+                
+                # Auto-update targets for Kids portfolios on load (child got older)
+                if p_type == "Kids" and st.session_state[f"{selected_portfolio}_birth_date"]:
+                    kids_targets = calculate_kids_targets(st.session_state[f"{selected_portfolio}_birth_date"])
+                    if kids_targets:
+                        for ticker, target in kids_targets.items():
+                            for stock in st.session_state.stocks:
+                                if stock['name'] == ticker:
+                                    stock['target_allocation'] = target
+                                    break
 
             for idx, stock in enumerate(st.session_state.stocks):
                 key_prefix = f"{selected_portfolio}_{idx}"
@@ -805,8 +843,60 @@ elif authentication_status:
     with st.sidebar:
         if selected_portfolio:
             # 2. Configuration Section
-            if p_type != "Stocks":
-                with st.expander("⚙️ Configuration", expanded=False):
+            if p_type in ["Dividends", "Kids", "Other"]:
+                # Default expander behavior: auto-expand for 'Kids' to set birth date, others remain collapsed
+                with st.expander("⚙️ Configuration", expanded=(p_type == "Kids")):
+                    if p_type == "Kids":
+                        birth_date_key = f"{selected_portfolio}_birth_date"
+                        current_birth_date = st.session_state.get(birth_date_key, '')
+                        
+                        try:
+                            # Robust check for string type to avoid numpy.float64 (NaN) crashes
+                            if isinstance(current_birth_date, str) and current_birth_date:
+                                default_date = datetime.strptime(current_birth_date, "%Y-%m-%d").date()
+                            else:
+                                default_date = datetime.today().date()
+                        except ValueError:
+                            default_date = datetime.today().date()
+                            
+                        birth_date_input = st.date_input(
+                            "Child's Birth Date",
+                            value=default_date,
+                            min_value=datetime(1900, 1, 1).date(),
+                            max_value=datetime(2100, 1, 1).date(),
+                            key=f"{birth_date_key}_input",
+                            on_change=clear_recommendations
+                        )
+                        
+                        if str(birth_date_input) != current_birth_date:
+                            st.session_state[birth_date_key] = str(birth_date_input)
+                            st.session_state.has_unsaved_changes = True
+                            
+                            # Auto-calculate age-based targets
+                            kids_targets = calculate_kids_targets(str(birth_date_input))
+                            if kids_targets:
+                                existing_tickers = {s['name'] for s in st.session_state.stocks}
+                                for ticker, target in kids_targets.items():
+                                    if ticker in existing_tickers:
+                                        for i, stock in enumerate(st.session_state.stocks):
+                                            if stock['name'] == ticker:
+                                                st.session_state.stocks[i]['target_allocation'] = target
+                                                st.session_state[f"{selected_portfolio}_{i}_target"] = target
+                                                break
+                                    elif ticker in ["VWCE.DE", "VAGF.DE"]:
+                                        # Auto-inject core tickers if they don't exist in the portfolio yet
+                                        st.session_state.stocks.append({
+                                            "name": ticker,
+                                            "current_value": 0.0,
+                                            "target_allocation": target,
+                                            "tolerance": 2.0,
+                                            "expense_ratio": 0.0,
+                                            "full_name": ticker,
+                                            "sector": "", "industry": "", "country": "", "currency": "EUR", "quantity": 0.0, "average_price": 0.0, "dividend_yield": 0.0
+                                        })
+                                st.toast("👶 Age-based targets updated!", icon="✅")
+                                st.rerun()
+
                     monthly_investment_key = f"{selected_portfolio}_monthly_invest"
                     
                     monthly_investment = st.number_input(
@@ -981,7 +1071,9 @@ elif authentication_status:
                             "currency": new_currency,
                             "quantity": new_qty,
                             "average_price": new_avg_price,
-                            "dividend_yield": new_div_yield
+                            "dividend_yield": new_div_yield,
+                            "portfolio_type": p_type,
+                            "portfolio_birth_date": st.session_state.get(f"{selected_portfolio}_birth_date", "")
                         }])
                         
                         mask_placeholder = (data['username'] == username) & \
@@ -1093,7 +1185,7 @@ elif authentication_status:
                         column_config = {
                             "name": st.column_config.TextColumn("Ticker", required=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=100.0, format="%.2f"),
-                            "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
+                            "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%", disabled=(p_type == "Kids")),
                             "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -1161,6 +1253,7 @@ elif authentication_status:
                             portfolio_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
                             portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
                             portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
+                            portfolio_birth_date = st.session_state.get(f"{selected_portfolio}_birth_date", "")
                             portfolio_type = p_type
         
                             mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
@@ -1170,11 +1263,13 @@ elif authentication_status:
                                 fr = user_portfolio_df.iloc[0]
                                 if (abs(portfolio_invest - fr.get('portfolio_monthly_invest', 1000.0)) > 0.1 or
                                     portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
+                                    portfolio_birth_date != fr.get('portfolio_birth_date', '') or
                                     abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
                                     any_content_changes = True
                                     data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
                                     data.loc[mask, 'portfolio_use_indicators'] = portfolio_use_ind
                                     data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
+                                    data.loc[mask, 'portfolio_birth_date'] = portfolio_birth_date
                             
                             # 2. Update Stock Data (Refactored for Data Editor)
                             # We rebuild the rows for this portfolio entirely from the edited_df
@@ -1198,6 +1293,7 @@ elif authentication_status:
                                          "portfolio_monthly_invest": portfolio_invest,
                                         "portfolio_use_indicators": portfolio_use_ind,
                                         "portfolio_buffett_index": portfolio_buffett,
+                                        "portfolio_birth_date": portfolio_birth_date,
                                         "portfolio_type": portfolio_type,
                                         "stock_full_name": row.get('full_name', ''),
                                         "sector": row.get('sector', ''),
@@ -1280,7 +1376,12 @@ elif authentication_status:
                                 sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
                                 remaining_investment = float(monthly_investment)
                                 
+                                # --- REFINED ALLOCATION LOGIC (3-PASS ENFORCEMENT) ---
+                                restricted_tickers = ["NVG.PT", "BCP.PT"]
+                                is_dividends_p = (p_type == "Dividends") or (selected_portfolio and "dividends" in selected_portfolio.lower())
+                                
                                 temp_allocs = []
+                                # PASS 1: Calculate standard floored investments based on gaps
                                 for item in sorted_gaps:
                                     ideal_invest = max(0.0, min(item['Gap'], remaining_investment))
                                     import math
@@ -1288,9 +1389,52 @@ elif authentication_status:
                                     remaining_investment -= floored_invest
                                     temp_allocs.append({"item": item, "invest": floored_invest})
                                 
+                                # PASS 2: Enforce 10€ rule for restricted stocks in Dividends portfolio
+                                # We try to "top up" to 10€ if they got > 0 but < 10
+                                if is_dividends_p:
+                                    for alloc in temp_allocs:
+                                        ticker = str(alloc['item']['Stock']).strip().upper()
+                                        if ticker in restricted_tickers:
+                                            current_invest = alloc['invest']
+                                            if 0 < current_invest < 10:
+                                                needed = 10.0 - current_invest
+                                                if remaining_investment >= needed:
+                                                    # We have enough leftover budget to reach the 10€ minimum
+                                                    alloc['invest'] = 10.0
+                                                    remaining_investment -= needed
+                                                else:
+                                                    # Can't afford the minimum, set to 0 and reclaim the floored amount
+                                                    remaining_investment += current_invest
+                                                    alloc['invest'] = 0.0
+                                
+                                # PASS 3: Safe Redistribution of the remaining balance (decimals + rejected amounts)
                                 if temp_allocs:
-                                    temp_allocs[0]['invest'] += remaining_investment
-                                    remaining_investment = 0.0 
+                                    dump_idx = -1
+                                    # Strategy: Find a safe stock to "dump" the remaining balance into.
+                                    # 1. Prefer a non-restricted stock
+                                    for i, alloc in enumerate(temp_allocs):
+                                        ticker = str(alloc['item']['Stock']).strip().upper()
+                                        if not (is_dividends_p and ticker in restricted_tickers):
+                                            dump_idx = i
+                                            break
+                                    
+                                    # 2. If no non-restricted stocks, prefer a restricted one that ALREADY has >= 10
+                                    if dump_idx == -1:
+                                        for i, alloc in enumerate(temp_allocs):
+                                            if alloc['invest'] >= 10:
+                                                dump_idx = i
+                                                break
+                                    
+                                    # 3. Last resort: Dump into first restricted stock ONLY if it can reach 10€
+                                    if dump_idx == -1:
+                                        if remaining_investment >= 10:
+                                            dump_idx = 0
+                                        # If even this fails, it stays in 'remaining_investment' for the user to see
+                                    
+                                    if dump_idx != -1:
+                                        temp_allocs[dump_idx]['invest'] += remaining_investment
+                                        remaining_investment = 0.0
+                                # --- END REFINED LOGIC ---
                                 
                                 # Map investments to tickers
                                 invest_map = {row['item']['Stock']: row['invest'] for row in temp_allocs}
@@ -1570,7 +1714,7 @@ elif authentication_status:
                 u_col, s_col = st.columns([1, 1])
                 with u_col:
                     if st.session_state.get('show_undo'):
-                        if st.button("↩️ Undo Delete", key="undo_details_btn", use_container_width=True):
+                        if st.button("↩️ Undo Delete", key="undo_details_btn", width="stretch"):
                             if st.session_state.undo_buffer:
                                 st.session_state.stocks.extend(st.session_state.undo_buffer)
                                 st.session_state.undo_buffer = []
@@ -1580,11 +1724,12 @@ elif authentication_status:
                                 st.rerun()
                 
                 with s_col:
-                    if st.button("💾 Save All Changes", key="save_details_btn", use_container_width=True):
+                    if st.button("💾 Save All Changes", key="save_details_btn", width="stretch"):
                         # Determine current portfolio config
                         portfolio_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
                         portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
                         portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
+                        portfolio_birth_date = st.session_state.get(f"{selected_portfolio}_birth_date", "")
                         portfolio_type = p_type
                         
                         mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
@@ -1625,6 +1770,7 @@ elif authentication_status:
                                 "portfolio_monthly_invest": portfolio_invest,
                                 "portfolio_use_indicators": portfolio_use_ind,
                                 "portfolio_buffett_index": portfolio_buffett,
+                                "portfolio_birth_date": portfolio_birth_date,
                                 "portfolio_type": portfolio_type,
                                 "stock_full_name": '', "sector": '', "industry": '', "country": '', "currency": '', "quantity": 0.0, "average_price": 0.0, "dividend_yield": 0.0
                             })
@@ -1726,7 +1872,7 @@ elif authentication_status:
                         
                         div_amount = st.number_input("Amount (€)", min_value=0.0, step=0.01)
                         
-                        if st.button("Add Record", use_container_width=True):
+                        if st.button("Add Record", width="stretch"):
                             if div_ticker and div_amount > 0:
                                 new_div = {
                                     "date": str(div_date),
