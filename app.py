@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 st.set_page_config(page_title="Portfolio Master", page_icon="🚀", layout="wide")
 
@@ -588,7 +588,7 @@ elif authentication_status:
                 'portfolio_use_indicators', 'portfolio_buffett_index',
                 'stock_full_name', 'sector', 'industry', 'country', 'currency', 
                 'quantity', 'average_price', 'dividend_yield', 'portfolio_type',
-                'portfolio_birth_date'
+                'portfolio_birth_date', 'portfolio_uninvested_cash'
             ]
             
             if raw_data.empty:
@@ -601,6 +601,7 @@ elif authentication_status:
                         elif col == 'portfolio_buffett_index': raw_data[col] = 195.0
                         elif col == 'portfolio_type': raw_data[col] = 'Other'
                         elif col == 'portfolio_birth_date': raw_data[col] = ''
+                        elif col == 'portfolio_uninvested_cash': raw_data[col] = 0.0
                         elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio', 'quantity', 'average_price', 'dividend_yield']: raw_data[col] = 0.0
                         else: raw_data[col] = ''
                         
@@ -821,6 +822,10 @@ elif authentication_status:
                 st.session_state[f"{selected_portfolio}_use_indicators"] = bool(first_row.get('portfolio_use_indicators', False))
                 st.session_state[f"{selected_portfolio}_buffett_index"] = float(first_row.get('portfolio_buffett_index', 195.0))
                 st.session_state[f"{selected_portfolio}_birth_date"] = first_row.get('portfolio_birth_date', '')
+                try:
+                    st.session_state[f"{selected_portfolio}_uninvested_cash"] = float(first_row.get('portfolio_uninvested_cash', 0.0))
+                except (ValueError, TypeError):
+                    st.session_state[f"{selected_portfolio}_uninvested_cash"] = 0.0
                 
                 # Auto-update targets for Kids portfolios on load (child got older)
                 if p_type == "Kids" and st.session_state[f"{selected_portfolio}_birth_date"]:
@@ -1111,13 +1116,14 @@ elif authentication_status:
         # Dashboard Header
         st.markdown(f"## 📊 {selected_portfolio} Dashboard")
         
-        # Calculate Weighted TER for KPI
+        # Calculate Current Weighted TER for KPI (including all assets)
         total_ter_sum = 0.0
+        
         for s in live_stocks:
             try:
-                val = float(s.get('current_value', 0.0))
+                current_val = float(s.get('current_value', 0.0))
                 ter = float(s.get('expense_ratio', 0.0))
-                total_ter_sum += (val * ter)
+                total_ter_sum += (current_val * ter)
             except (ValueError, TypeError):
                 continue
                 
@@ -1147,11 +1153,11 @@ elif authentication_status:
         
         tab_list = []
         if p_type == "Stocks":
-            tab_list = ["📈 Portfolio Details"]
+            tab_list = ["📈 Portfolio Details", "🪙 Uninvested Cash"]
         elif p_type == "Dividends":
-            tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker"]
+            tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
         else: # Other
-            tab_list = ["📊 Manage Portfolio"]
+            tab_list = ["📊 Manage Portfolio", "🪙 Uninvested Cash"]
             
         tabs = st.tabs(tab_list)
         
@@ -1184,8 +1190,8 @@ elif authentication_status:
                         # Configuration for Data Editor
                         column_config = {
                             "name": st.column_config.TextColumn("Ticker", required=True),
-                            "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=100.0, format="%.2f"),
-                            "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%", disabled=(p_type == "Kids")),
+                            "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
+                            "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", disabled=(p_type == "Kids")),
                             "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -1254,6 +1260,10 @@ elif authentication_status:
                             portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
                             portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
                             portfolio_birth_date = st.session_state.get(f"{selected_portfolio}_birth_date", "")
+                            try:
+                                portfolio_uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                            except:
+                                portfolio_uninvested_cash = 0.0
                             portfolio_type = p_type
         
                             mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
@@ -1261,15 +1271,21 @@ elif authentication_status:
                             # Check for Config Changes
                             if not user_portfolio_df.empty:
                                 fr = user_portfolio_df.iloc[0]
+                                try:
+                                    fr_cash = float(fr.get('portfolio_uninvested_cash', 0.0))
+                                except:
+                                    fr_cash = 0.0
                                 if (abs(portfolio_invest - fr.get('portfolio_monthly_invest', 1000.0)) > 0.1 or
                                     portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
                                     portfolio_birth_date != fr.get('portfolio_birth_date', '') or
+                                    abs(portfolio_uninvested_cash - fr_cash) > 0.01 or
                                     abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
                                     any_content_changes = True
                                     data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
                                     data.loc[mask, 'portfolio_use_indicators'] = portfolio_use_ind
                                     data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
                                     data.loc[mask, 'portfolio_birth_date'] = portfolio_birth_date
+                                    data.loc[mask, 'portfolio_uninvested_cash'] = portfolio_uninvested_cash
                             
                             # 2. Update Stock Data (Refactored for Data Editor)
                             # We rebuild the rows for this portfolio entirely from the edited_df
@@ -1294,6 +1310,7 @@ elif authentication_status:
                                         "portfolio_use_indicators": portfolio_use_ind,
                                         "portfolio_buffett_index": portfolio_buffett,
                                         "portfolio_birth_date": portfolio_birth_date,
+                                        "portfolio_uninvested_cash": portfolio_uninvested_cash,
                                         "portfolio_type": portfolio_type,
                                         "stock_full_name": row.get('full_name', ''),
                                         "sector": row.get('sector', ''),
@@ -1352,88 +1369,180 @@ elif authentication_status:
                             else:
                                 # ... (Calculation Logic reused) ...
                                 new_total_theoretical = total_current_live + monthly_investment
-                                
-                                eligible_stocks = []
-                                for stock in live_stocks:
-                                    # A stock is eligible if its CURRENT value is less than its post-investment TARGET value (considering tolerance)
-                                    # Post-investment target = new_total_theoretical * (target_pct / 100)
-                                    target_val_theoretical = new_total_theoretical * (stock['target_allocation'] / 100.0)
-                                    tolerance_buffer = new_total_theoretical * (stock.get('tolerance', 0.0) / 100.0)
-                                    
-                                    if stock['current_value'] < (target_val_theoretical - tolerance_buffer):
-                                        eligible_stocks.append(stock)
-                                
-                                if not eligible_stocks:
-                                    st.warning("All stocks are within their tolerance bands! No rebalancing needed.")
-                                    eligible_stocks = live_stocks 
-        
-                                stock_gaps = []
-                                for stock in eligible_stocks:
-                                    target_val = new_total_theoretical * (stock['target_allocation'] / 100.0)
-                                    gap = target_val - stock['current_value']
-                                    stock_gaps.append({"Stock": stock['name'], "Target Value": target_val, "Gap": gap, "stock": stock})
-                                
-                                sorted_gaps = sorted(stock_gaps, key=lambda x: x['Gap'], reverse=True)
                                 remaining_investment = float(monthly_investment)
+                                import math
                                 
-                                # --- REFINED ALLOCATION LOGIC (3-PASS ENFORCEMENT) ---
-                                restricted_tickers = ["NVG.PT", "BCP.PT"]
+                                # STEP 1 - Calculate deviations and identify priorities
+                                stock_data = []
+                                sum_positive_deviations = 0.0
+                                
+                                for stock in live_stocks:
+                                    current_weight = (stock['current_value'] / total_current_live * 100.0) if total_current_live > 0 else 0.0
+                                    target_weight = stock['target_allocation']
+                                    deviation = target_weight - current_weight
+                                    
+                                    min_band = target_weight - stock.get('tolerance', 0.0)
+                                    max_band = target_weight + stock.get('tolerance', 0.0)
+                                    
+                                    below_min_band = current_weight < min_band
+                                    below_target = deviation > 0
+                                    above_max_band = current_weight > max_band
+                                    
+                                    if below_target and not above_max_band:
+                                        sum_positive_deviations += deviation
+                                        
+                                    target_val = new_total_theoretical * (target_weight / 100.0)
+                                    gap = target_val - stock['current_value']
+                                    
+                                    stock_data.append({
+                                        'Stock': stock['name'],
+                                        'Target Value': target_val,
+                                        'Gap': gap,
+                                        'stock': stock,
+                                        'current_weight': current_weight,
+                                        'target_weight': target_weight,
+                                        'deviation': deviation,
+                                        'below_min_band': below_min_band,
+                                        'below_target': below_target,
+                                        'above_max_band': above_max_band,
+                                        'invest': 0.0
+                                    })
+                                
+                                # STEP 3 - Priority for assets below the minimum band
+                                total_needed_band = 0.0
+                                for item in stock_data:
+                                    if item['below_min_band']:
+                                        min_band_eur = new_total_theoretical * ((item['target_weight'] - item['stock'].get('tolerance', 0.0)) / 100.0)
+                                        needed = max(0.0, min_band_eur - item['stock']['current_value'])
+                                        item['needed_band'] = needed
+                                        total_needed_band += needed
+                                    else:
+                                        item['needed_band'] = 0.0
+                                        
+                                if total_needed_band > 0 and remaining_investment > 0:
+                                    emergency_dist = 0.0
+                                    
+                                    if total_needed_band <= remaining_investment:
+                                        # Enough money to save all
+                                        for item in stock_data:
+                                            if item['needed_band'] > 0:
+                                                alloc = float(math.floor(item['needed_band']))
+                                                item['invest'] += alloc
+                                                emergency_dist += alloc
+                                    else:
+                                        # Not enough money to close min bands for all (Proportional Emergency Distribution)
+                                        emergency_funds = remaining_investment
+                                        proportions_em = []
+                                        for item in stock_data:
+                                            if item['needed_band'] > 0:
+                                                prop_alloc = (item['needed_band'] / total_needed_band) * emergency_funds
+                                                proportions_em.append({'item': item, 'ideal': prop_alloc})
+                                        
+                                        for p in proportions_em:
+                                            alloc = float(math.floor(p['ideal']))
+                                            p['item']['invest'] += alloc
+                                            emergency_dist += alloc
+                                            
+                                        emergency_remainder = remaining_investment - emergency_dist
+                                        if emergency_remainder >= 1.0:
+                                            gaps_em = sorted(proportions_em, key=lambda x: x['item']['needed_band'] - x['item']['invest'], reverse=True)
+                                            for p in gaps_em:
+                                                if emergency_remainder < 1.0: break
+                                                add_alloc = float(math.floor(min(emergency_remainder, p['item']['needed_band'] - p['item']['invest'])))
+                                                if add_alloc > 0:
+                                                    p['item']['invest'] += add_alloc
+                                                    emergency_dist += add_alloc
+                                                    emergency_remainder -= add_alloc
+                                                    
+                                    remaining_investment -= emergency_dist
+                                
+                                # STEP 2 - Distribute remaining proportionally to positive deviation
+                                if remaining_investment > 0 and sum_positive_deviations > 0:
+                                    funds_for_proportional = remaining_investment
+                                    proportions = []
+                                    for item in stock_data:
+                                        if item['below_target'] and not item['above_max_band']:
+                                            # Allocated = Item Deviation / Sum Deviations * Total Funds
+                                            prop_alloc = (item['deviation'] / sum_positive_deviations) * funds_for_proportional
+                                            
+                                            # Cap at Gap value (max euros to reach 100% target)
+                                            max_inv = max(0.0, item['Gap'] - item['invest'])
+                                            ideal_invest = min(prop_alloc, max_inv)
+                                            proportions.append({'item': item, 'ideal': ideal_invest})
+                                            
+                                    real_dist = 0.0
+                                    for p in proportions:
+                                        floored = float(math.floor(p['ideal']))
+                                        p['item']['invest'] += floored
+                                        real_dist += floored
+                                        
+                                    remaining_investment -= real_dist
+                                
+                                # If there is still leftovers, iterate by highest gaps (euros) to place the change without violating maximums
+                                if remaining_investment >= 1.0:
+                                    gaps = []
+                                    for item in stock_data:
+                                        if not item['above_max_band']:
+                                            actual_gap = item['Gap'] - item['invest']
+                                            if actual_gap > 0:
+                                                gaps.append({'item': item, 'actual_gap': actual_gap})
+                                    
+                                    gaps = sorted(gaps, key=lambda x: x['actual_gap'], reverse=True)
+                                    for g_info in gaps:
+                                        if remaining_investment < 1.0: break
+                                        add_alloc = float(math.floor(min(remaining_investment, g_info['actual_gap'])))
+                                        if add_alloc > 0:
+                                            g_info['item']['invest'] += add_alloc
+                                            remaining_investment -= add_alloc
+
+                                # --- REFINED ALLOCATION LOGIC (3-STEP ENFORCEMENT) ---
+                                restricted_minimums = {
+                                    "RENE.PT": 5.0,
+                                    "JMT.PT": 5.0,
+                                    "GALP.PT": 5.0,
+                                    "EDP.PT": 5.0
+                                }
+                                restricted_tickers = list(restricted_minimums.keys())
                                 is_dividends_p = (p_type == "Dividends") or (selected_portfolio and "dividends" in selected_portfolio.lower())
                                 
+                                # STEP 1 complete. Format to temp_allocs so Step 2 and 3 can use it exactly like before.
                                 temp_allocs = []
-                                # PASS 1: Calculate standard floored investments based on gaps
-                                for item in sorted_gaps:
-                                    ideal_invest = max(0.0, min(item['Gap'], remaining_investment))
-                                    import math
-                                    floored_invest = float(math.floor(ideal_invest))
-                                    remaining_investment -= floored_invest
-                                    temp_allocs.append({"item": item, "invest": floored_invest})
+                                for item in stock_data:
+                                    temp_allocs.append({"item": item, "invest": item['invest']})
                                 
-                                # PASS 2: Enforce 10€ rule for restricted stocks in Dividends portfolio
-                                # We try to "top up" to 10€ if they got > 0 but < 10
-                                if is_dividends_p:
-                                    for alloc in temp_allocs:
-                                        ticker = str(alloc['item']['Stock']).strip().upper()
-                                        if ticker in restricted_tickers:
-                                            current_invest = alloc['invest']
-                                            if 0 < current_invest < 10:
-                                                needed = 10.0 - current_invest
-                                                if remaining_investment >= needed:
-                                                    # We have enough leftover budget to reach the 10€ minimum
-                                                    alloc['invest'] = 10.0
-                                                    remaining_investment -= needed
-                                                else:
-                                                    # Can't afford the minimum, set to 0 and reclaim the floored amount
-                                                    remaining_investment += current_invest
-                                                    alloc['invest'] = 0.0
+                                # STEP 2: Enforce minimum investment rules (Global)
+                                # We try to "top up" to the required minimum if they got > 0 but < minimum
+                                for alloc in temp_allocs:
+                                    ticker = str(alloc['item']['Stock']).strip().upper()
+                                    if ticker in restricted_minimums:
+                                        min_req = restricted_minimums[ticker]
+                                        current_invest = alloc['invest']
+                                        if 0 < current_invest < min_req:
+                                            needed = min_req - current_invest
+                                            if remaining_investment >= needed:
+                                                alloc['invest'] = min_req
+                                                remaining_investment -= needed
+                                            else:
+                                                remaining_investment += current_invest
+                                                alloc['invest'] = 0.0
                                 
-                                # PASS 3: Safe Redistribution of the remaining balance (decimals + rejected amounts)
-                                if temp_allocs:
+                                # STEP 3: Single Decimal Redistribution (as requested)
+                                if temp_allocs and remaining_investment > 0:
                                     dump_idx = -1
-                                    # Strategy: Find a safe stock to "dump" the remaining balance into.
-                                    # 1. Prefer a non-restricted stock
+                                    max_invest = -1.0
+                                    
+                                    # Strategy: Add leftover cents to the stock that already has the highest investment
+                                    # This guarantees we don't force an investment < 1€ into a new stock or one receiving 0€
                                     for i, alloc in enumerate(temp_allocs):
-                                        ticker = str(alloc['item']['Stock']).strip().upper()
-                                        if not (is_dividends_p and ticker in restricted_tickers):
+                                        if alloc['invest'] > max_invest:
+                                            max_invest = alloc['invest']
                                             dump_idx = i
-                                            break
                                     
-                                    # 2. If no non-restricted stocks, prefer a restricted one that ALREADY has >= 10
                                     if dump_idx == -1:
-                                        for i, alloc in enumerate(temp_allocs):
-                                            if alloc['invest'] >= 10:
-                                                dump_idx = i
-                                                break
-                                    
-                                    # 3. Last resort: Dump into first restricted stock ONLY if it can reach 10€
-                                    if dump_idx == -1:
-                                        if remaining_investment >= 10:
-                                            dump_idx = 0
-                                        # If even this fails, it stays in 'remaining_investment' for the user to see
-                                    
-                                    if dump_idx != -1:
-                                        temp_allocs[dump_idx]['invest'] += remaining_investment
-                                        remaining_investment = 0.0
+                                        dump_idx = 0
+                                        
+                                    temp_allocs[dump_idx]['invest'] += remaining_investment
+                                    remaining_investment = 0.0
                                 # --- END REFINED LOGIC ---
                                 
                                 # Map investments to tickers
@@ -1730,6 +1839,10 @@ elif authentication_status:
                         portfolio_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
                         portfolio_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
                         portfolio_birth_date = st.session_state.get(f"{selected_portfolio}_birth_date", "")
+                        try:
+                            portfolio_uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                        except:
+                            portfolio_uninvested_cash = 0.0
                         portfolio_type = p_type
                         
                         mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
@@ -1749,6 +1862,7 @@ elif authentication_status:
                                     "portfolio_monthly_invest": portfolio_invest,
                                     "portfolio_use_indicators": portfolio_use_ind,
                                     "portfolio_buffett_index": portfolio_buffett,
+                                    "portfolio_uninvested_cash": portfolio_uninvested_cash,
                                     "portfolio_type": portfolio_type,
                                     "stock_full_name": s.get('full_name', ''),
                                     "sector": s.get('sector', ''),
@@ -1771,6 +1885,7 @@ elif authentication_status:
                                 "portfolio_use_indicators": portfolio_use_ind,
                                 "portfolio_buffett_index": portfolio_buffett,
                                 "portfolio_birth_date": portfolio_birth_date,
+                                "portfolio_uninvested_cash": portfolio_uninvested_cash,
                                 "portfolio_type": portfolio_type,
                                 "stock_full_name": '', "sector": '', "industry": '', "country": '', "currency": '', "quantity": 0.0, "average_price": 0.0, "dividend_yield": 0.0
                             })
@@ -1851,6 +1966,62 @@ elif authentication_status:
                     else:
                         st.info("Add stocks to see distributions.")
 
+        if "🪙 Uninvested Cash" in tab_map:
+            with tab_map["🪙 Uninvested Cash"]:
+                st.subheader("🪙 Uninvested Cash Balance")
+                st.write("Keep track of the remaining cents that were not invested during your last rebalancing.")
+                
+                try:
+                    current_uninvested = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                except:
+                    current_uninvested = 0.0
+                    
+                if current_uninvested > 0:
+                    st.markdown(
+                        f"""
+                        <div style="padding: 10px 15px; border-radius: 8px; background-color: rgba(255, 139, 118, 0.1); border: 1px solid rgba(255, 139, 118, 0.5); display: inline-block; margin-bottom: 15px;">
+                            <div style="font-size: 0.85rem; color: #888; margin-bottom: 4px;">Currently Saved Balance</div>
+                            <div style="font-size: 1.8rem; font-weight: 700; color: #FF8B76;">€{current_uninvested:.2f} ⚠️</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.metric("Currently Saved Balance", f"€{current_uninvested:.2f}")
+                
+                input_col, btn_col, _ = st.columns([2.5, 1.5, 4])
+                
+                with input_col:
+                    new_uninvested = st.number_input(
+                        "Update Cash Balance (€)", 
+                        min_value=0.0, 
+                        value=current_uninvested, 
+                        step=0.01,
+                        format="%.2f",
+                        key=f"{selected_portfolio}_uninvested_input"
+                    )
+                
+                with btn_col:
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("💾 Save", width=150):
+                        st.session_state[f"{selected_portfolio}_uninvested_cash"] = new_uninvested
+                        
+                        # Apply to dataframe and save
+                        mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
+                        data.loc[mask, 'portfolio_uninvested_cash'] = new_uninvested
+                        
+                        try:
+                            conn.update(worksheet="Portfolios", data=data)
+                            st.session_state.master_data = data
+                            st.session_state.show_cash_success = True
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to save: {e}")
+                        
+                if st.session_state.get("show_cash_success"):
+                    st.success("Cash balance saved successfully! ✅")
+                    st.session_state.show_cash_success = False
+                        
         if "💰 Dividend Tracker" in tab_map:
             with tab_map["💰 Dividend Tracker"]:
                 st.session_state.footer_msg = "<b>Passive Income:</b> Track your dividend yields and growth."
@@ -1954,6 +2125,7 @@ elif authentication_status:
                                 
                                 # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
                                 monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
+                                monthly_stats['amount'] = monthly_stats['amount'].round(2)
                                 
                                 st.markdown("**Dividends Received (Yearly Comparison)**")
                                 fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
@@ -1967,7 +2139,54 @@ elif authentication_status:
                                 )
                                 st.plotly_chart(fig_div, use_container_width=True, config={'displayModeBar': False})
                                 with st.expander("Dividend History"):
-                                    st.dataframe(my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False), use_container_width=True)
+                                    history_df = my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False).copy()
+                                    history_df['date'] = history_df['date'].dt.date
+                                    
+                                    # Ensure we have available tickers for the editor
+                                    portfolio_tickers = [s['name'] for s in st.session_state.stocks if s['name'] != "__PLACEHOLDER__"]
+                                    if filter_ticker != "All Data" and filter_ticker not in portfolio_tickers:
+                                        portfolio_tickers.append(filter_ticker)
+                                        
+                                    edited_history = st.data_editor(
+                                        history_df,
+                                        column_config={
+                                            "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                                            "ticker": st.column_config.SelectboxColumn("Ticker", options=portfolio_tickers, required=True),
+                                            "amount": st.column_config.NumberColumn("Amount (€)", min_value=0.0, format="€%.2f", required=True),
+                                        },
+                                        use_container_width=True,
+                                        num_rows="dynamic",
+                                        key=f"div_history_editor_{st.session_state.get('editor_key', 0)}"
+                                    )
+                                    
+                                    if st.button("💾 Save History Changes", width="stretch", key="save_div_hist"):
+                                        old_dividends = st.session_state.dividends.drop(index=my_divs.index)
+                                        
+                                        new_records = []
+                                        for _, row in edited_history.iterrows():
+                                            if pd.notna(row['date']) and pd.notna(row['ticker']) and pd.notna(row['amount']):
+                                                try:
+                                                    date_str = pd.to_datetime(row['date']).strftime('%Y-%m-%d')
+                                                except:
+                                                    date_str = str(row['date'])
+                                                new_records.append({
+                                                    "date": date_str,
+                                                    "ticker": str(row['ticker']),
+                                                    "amount": float(row['amount']),
+                                                    "portfolio_name": selected_portfolio,
+                                                    "username": username
+                                                })
+                                        
+                                        if new_records:
+                                            new_df = pd.DataFrame(new_records)
+                                            curr_divs = pd.concat([old_dividends, new_df], ignore_index=True)
+                                        else:
+                                            curr_divs = old_dividends.reset_index(drop=True)
+                                            
+                                        st.session_state.dividends = curr_divs
+                                        conn.update(worksheet="Dividends", data=curr_divs)
+                                        st.success("History updated!")
+                                        st.rerun()
                             else:
                                 st.info("No dividends recorded for this portfolio yet.")
                         else:
