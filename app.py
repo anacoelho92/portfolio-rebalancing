@@ -588,7 +588,7 @@ elif authentication_status:
                 'portfolio_use_indicators', 'portfolio_buffett_index',
                 'stock_full_name', 'sector', 'industry', 'country', 'currency', 
                 'quantity', 'average_price', 'dividend_yield', 'portfolio_type',
-                'portfolio_birth_date', 'portfolio_uninvested_cash'
+                'portfolio_birth_date', 'portfolio_uninvested_cash', 'current_price'
             ]
             
             if raw_data.empty:
@@ -602,7 +602,7 @@ elif authentication_status:
                         elif col == 'portfolio_type': raw_data[col] = 'Other'
                         elif col == 'portfolio_birth_date': raw_data[col] = ''
                         elif col == 'portfolio_uninvested_cash': raw_data[col] = 0.0
-                        elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio', 'quantity', 'average_price', 'dividend_yield']: raw_data[col] = 0.0
+                        elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio', 'quantity', 'average_price', 'dividend_yield', 'current_price']: raw_data[col] = 0.0
                         else: raw_data[col] = ''
                         
                 raw_data = raw_data.astype({
@@ -611,7 +611,8 @@ elif authentication_status:
                     'current_value': 'float',
                     'target_allocation': 'float',
                     'expense_ratio': 'float',
-                    'portfolio_name': 'str'
+                    'portfolio_name': 'str',
+                    'current_price': 'float'
                 })
                 raw_data['portfolio_name'] = raw_data['portfolio_name'].fillna('Default')
                 raw_data['username'] = raw_data['username'].fillna('unknown') 
@@ -807,6 +808,7 @@ elif authentication_status:
                 "currency": row.get('currency', ''),
                 "quantity": float(row.get('quantity', 0.0)),
                 "average_price": float(row.get('average_price', 0.0)),
+                "current_price": float(row.get('current_price', 0.0)),
                 "dividend_yield": float(row.get('dividend_yield', 0.0))
             })
         st.session_state.stocks = current_stocks
@@ -1196,11 +1198,15 @@ elif authentication_status:
                             current_stocks_df.set_index("name", inplace=True)
                             
                             # Slice to only include core rebalancing columns for this tab
-                            core_cols = ["current_value", "target_allocation", "tolerance", "expense_ratio"]
+                            core_cols = ["current_value", "target_allocation", "tolerance"]
+                            if p_type == "Dividends":
+                                core_cols.append("current_price")
+                            core_cols.append("expense_ratio")
+                            
                             available_core = [c for c in core_cols if c in current_stocks_df.columns]
                             current_stocks_df = current_stocks_df[available_core]
                         else:
-                            current_stocks_df = pd.DataFrame(columns=["current_value", "target_allocation", "tolerance", "expense_ratio"])
+                            current_stocks_df = pd.DataFrame(columns=["current_value", "target_allocation", "current_price", "tolerance", "expense_ratio"])
                             current_stocks_df.index.name = "name"
                         
                         # Configuration for Data Editor
@@ -1208,6 +1214,7 @@ elif authentication_status:
                             "name": st.column_config.TextColumn("Ticker", required=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn("Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", disabled=(p_type == "Kids")),
+                            "current_price": st.column_config.NumberColumn("Price (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "tolerance": st.column_config.NumberColumn("Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -1320,6 +1327,7 @@ elif authentication_status:
                                         "stock_name": row['name'],
                                         "current_value": row['current_value'],
                                         "target_allocation": row['target_allocation'],
+                                        "current_price": row.get('current_price', 0.0),
                                         "tolerance": row['tolerance'],
                                         "expense_ratio": row.get('expense_ratio', 0.0),
                                          "portfolio_monthly_invest": portfolio_invest,
@@ -1383,189 +1391,187 @@ elif authentication_status:
                             if abs(total_target_live - 100.0) > 0.01:
                                 st.error(f"Ratios sum to {total_target_live:.1f}%, must be 100%")
                             else:
-                                # ... (Calculation Logic reused) ...
-                                new_total_theoretical = total_current_live + monthly_investment
-                                remaining_investment = float(monthly_investment)
                                 import math
-                                
-                                # STEP 1 - Calculate deviations and identify priorities
-                                stock_data = []
-                                sum_positive_deviations = 0.0
-                                
-                                for stock in live_stocks:
-                                    current_weight = (stock['current_value'] / total_current_live * 100.0) if total_current_live > 0 else 0.0
-                                    target_weight = stock['target_allocation']
-                                    deviation = target_weight - current_weight
-                                    
-                                    min_band = target_weight - stock.get('tolerance', 0.0)
-                                    max_band = target_weight + stock.get('tolerance', 0.0)
-                                    
-                                    below_min_band = current_weight < min_band
-                                    below_target = deviation > 0
-                                    above_max_band = current_weight > max_band
-                                    
-                                    if below_target and not above_max_band:
-                                        sum_positive_deviations += deviation
-                                        
-                                    target_val = new_total_theoretical * (target_weight / 100.0)
-                                    gap = target_val - stock['current_value']
-                                    
-                                    stock_data.append({
-                                        'Stock': stock['name'],
-                                        'Target Value': target_val,
-                                        'Gap': gap,
-                                        'stock': stock,
-                                        'current_weight': current_weight,
-                                        'target_weight': target_weight,
-                                        'deviation': deviation,
-                                        'below_min_band': below_min_band,
-                                        'below_target': below_target,
-                                        'above_max_band': above_max_band,
-                                        'invest': 0.0
-                                    })
-                                
-                                # STEP 3 - Priority for assets below the minimum band
-                                total_needed_band = 0.0
-                                for item in stock_data:
-                                    if item['below_min_band']:
-                                        min_band_eur = new_total_theoretical * ((item['target_weight'] - item['stock'].get('tolerance', 0.0)) / 100.0)
-                                        needed = max(0.0, min_band_eur - item['stock']['current_value'])
-                                        item['needed_band'] = needed
-                                        total_needed_band += needed
-                                    else:
-                                        item['needed_band'] = 0.0
-                                        
-                                if total_needed_band > 0 and remaining_investment > 0:
-                                    emergency_dist = 0.0
-                                    
-                                    if total_needed_band <= remaining_investment:
-                                        # Enough money to save all
-                                        for item in stock_data:
-                                            if item['needed_band'] > 0:
-                                                alloc = float(math.floor(item['needed_band']))
-                                                item['invest'] += alloc
-                                                emergency_dist += alloc
-                                    else:
-                                        # Not enough money to close min bands for all (Proportional Emergency Distribution)
-                                        emergency_funds = remaining_investment
-                                        proportions_em = []
-                                        for item in stock_data:
-                                            if item['needed_band'] > 0:
-                                                prop_alloc = (item['needed_band'] / total_needed_band) * emergency_funds
-                                                proportions_em.append({'item': item, 'ideal': prop_alloc})
-                                        
-                                        for p in proportions_em:
-                                            alloc = float(math.floor(p['ideal']))
-                                            p['item']['invest'] += alloc
-                                            emergency_dist += alloc
-                                            
-                                        emergency_remainder = remaining_investment - emergency_dist
-                                        if emergency_remainder >= 1.0:
-                                            gaps_em = sorted(proportions_em, key=lambda x: x['item']['needed_band'] - x['item']['invest'], reverse=True)
-                                            for p in gaps_em:
-                                                if emergency_remainder < 1.0: break
-                                                add_alloc = float(math.floor(min(emergency_remainder, p['item']['needed_band'] - p['item']['invest'])))
-                                                if add_alloc > 0:
-                                                    p['item']['invest'] += add_alloc
-                                                    emergency_dist += add_alloc
-                                                    emergency_remainder -= add_alloc
-                                                    
-                                    remaining_investment -= emergency_dist
-                                
-                                # STEP 2 - Distribute remaining proportionally to positive deviation
-                                if remaining_investment > 0 and sum_positive_deviations > 0:
-                                    funds_for_proportional = remaining_investment
-                                    proportions = []
-                                    for item in stock_data:
-                                        if item['below_target'] and not item['above_max_band']:
-                                            # Allocated = Item Deviation / Sum Deviations * Total Funds
-                                            prop_alloc = (item['deviation'] / sum_positive_deviations) * funds_for_proportional
-                                            
-                                            # Cap at Gap value (max euros to reach 100% target)
-                                            max_inv = max(0.0, item['Gap'] - item['invest'])
-                                            ideal_invest = min(prop_alloc, max_inv)
-                                            proportions.append({'item': item, 'ideal': ideal_invest})
-                                            
-                                    real_dist = 0.0
-                                    for p in proportions:
-                                        floored = float(math.floor(p['ideal']))
-                                        p['item']['invest'] += floored
-                                        real_dist += floored
-                                        
-                                    remaining_investment -= real_dist
-                                
-                                # If there is still leftovers, iterate by highest gaps (euros) to place the change without violating maximums
-                                if remaining_investment >= 1.0:
-                                    gaps = []
-                                    for item in stock_data:
-                                        if not item['above_max_band']:
-                                            actual_gap = item['Gap'] - item['invest']
-                                            if actual_gap > 0:
-                                                gaps.append({'item': item, 'actual_gap': actual_gap})
-                                    
-                                    gaps = sorted(gaps, key=lambda x: x['actual_gap'], reverse=True)
-                                    for g_info in gaps:
-                                        if remaining_investment < 1.0: break
-                                        add_alloc = float(math.floor(min(remaining_investment, g_info['actual_gap'])))
-                                        if add_alloc > 0:
-                                            g_info['item']['invest'] += add_alloc
-                                            remaining_investment -= add_alloc
-
-                                # --- REFINED ALLOCATION LOGIC (3-STEP ENFORCEMENT) ---
-                                restricted_minimums = {
-                                    "RENE.PT": 5.0,
-                                    "JMT.PT": 5.0,
-                                    "GALP.PT": 5.0,
-                                    "EDP.PT": 5.0
-                                }
-                                restricted_tickers = list(restricted_minimums.keys())
                                 is_dividends_p = (p_type == "Dividends") or (selected_portfolio and "dividends" in selected_portfolio.lower())
+                                total_theoretical = total_current_live + monthly_investment
+                                remaining_investment = float(monthly_investment)
                                 
-                                # STEP 1 complete. Format to temp_allocs so Step 2 and 3 can use it exactly like before.
-                                temp_allocs = []
-                                for item in stock_data:
-                                    temp_allocs.append({"item": item, "invest": item['invest']})
+                                # Initial map for all stocks
+                                final_investments = {s['name']: 0.0 for s in live_stocks}
+                                stocks_to_process = [s for s in live_stocks]
                                 
-                                # STEP 2: Enforce minimum investment rules (Global)
-                                # We try to "top up" to the required minimum if they got > 0 but < minimum
-                                for alloc in temp_allocs:
-                                    ticker = str(alloc['item']['Stock']).strip().upper()
-                                    if ticker in restricted_minimums:
-                                        min_req = restricted_minimums[ticker]
-                                        current_invest = alloc['invest']
-                                        if 0 < current_invest < min_req:
-                                            needed = min_req - current_invest
-                                            if remaining_investment >= needed:
-                                                alloc['invest'] = min_req
-                                                remaining_investment -= needed
-                                            else:
-                                                remaining_investment += current_invest
-                                                alloc['invest'] = 0.0
-                                
-                                # STEP 3: Single Decimal Redistribution (as requested)
-                                if temp_allocs and remaining_investment > 0:
-                                    dump_idx = -1
-                                    max_invest = -1.0
-                                    
-                                    # Strategy: Add leftover cents to the stock that already has the highest investment
-                                    # This guarantees we don't force an investment < 1€ into a new stock or one receiving 0€
-                                    for i, alloc in enumerate(temp_allocs):
-                                        if alloc['invest'] > max_invest:
-                                            max_invest = alloc['invest']
-                                            dump_idx = i
-                                    
-                                    if dump_idx == -1:
-                                        dump_idx = 0
+                                # --- STEP 1: Special Handling for RENE.PT in Dividends (Integer Volume) ---
+                                if is_dividends_p:
+                                    rene_stock = next((s for s in live_stocks if s['name'].upper() == "RENE.PT"), None)
+                                    if rene_stock:
+                                        target_val = total_theoretical * (rene_stock['target_allocation'] / 100.0)
+                                        gap = target_val - rene_stock['current_value']
+                                        price = rene_stock.get('current_price', 0.0)
                                         
-                                    temp_allocs[dump_idx]['invest'] += remaining_investment
-                                    remaining_investment = 0.0
-                                # --- END REFINED LOGIC ---
+                                        invest_real = 0.0
+                                        if gap > 0 and price > 0:
+                                            # Determine integer quantity based on Gap
+                                            qty = math.floor(gap / price)
+                                            invest_real = qty * price
+                                            
+                                            # Cap by available monthly investment
+                                            if invest_real > remaining_investment:
+                                                qty = math.floor(remaining_investment / price)
+                                                invest_real = qty * price
+                                            
+                                            # MinBuy check (5€)
+                                            if invest_real < 5.0 and invest_real > 0:
+                                                invest_real = 0.0
+                                        
+                                        final_investments[rene_stock['name']] = invest_real
+                                        remaining_investment -= invest_real
+                                        # Remove RENE from the common pool for the next phases
+                                        stocks_to_process = [s for s in stocks_to_process if s['name'].upper() != "RENE.PT"]
+
+                                # --- STEP 2: Standard Rebalancing Algorithm for Remaining Stocks ---
+                                if remaining_investment > 0 and stocks_to_process:
+                                    # Phase A: Calculate Gaps and identify deviations
+                                    stock_data_p = []
+                                    sum_positive_deviations = 0.0
+                                    
+                                    for stock in stocks_to_process:
+                                        current_weight = (stock['current_value'] / total_current_live * 100.0) if total_current_live > 0 else 0.0
+                                        target_weight = stock['target_allocation']
+                                        deviation = target_weight - current_weight
+                                        
+                                        min_band = target_weight - stock.get('tolerance', 0.0)
+                                        below_min_band = current_weight < min_band
+                                        below_target = deviation > 0
+                                        
+                                        if below_target:
+                                            # Note: We don't cap by max_band here as requested for Dividends redistribution logic
+                                            sum_positive_deviations += deviation
+                                            
+                                        target_val = total_theoretical * (target_weight / 100.0)
+                                        gap = target_val - stock['current_value']
+                                        
+                                        stock_data_p.append({
+                                            'name': stock['name'],
+                                            'Gap': gap,
+                                            'stock': stock,
+                                            'deviation': deviation,
+                                            'below_min_band': below_min_band,
+                                            'below_target': below_target,
+                                            'invest': 0.0
+                                        })
+                                    
+                                    # Phase B: Priority for assets below the minimum band (Emergency)
+                                    total_needed_band = 0.0
+                                    for item in stock_data_p:
+                                        if item['below_min_band']:
+                                            min_band_eur = total_theoretical * ((item['stock']['target_allocation'] - item['stock'].get('tolerance', 0.0)) / 100.0)
+                                            needed = max(0.0, min_band_eur - item['stock']['current_value'])
+                                            item['needed_band'] = needed
+                                            total_needed_band += needed
+                                        else:
+                                            item['needed_band'] = 0.0
+                                            
+                                    if total_needed_band > 0 and remaining_investment > 0:
+                                        if total_needed_band <= remaining_investment:
+                                            for item in stock_data_p:
+                                                if item['needed_band'] > 0:
+                                                    alloc = item['needed_band']
+                                                    item['invest'] += alloc
+                                                    remaining_investment -= alloc
+                                        else:
+                                            # Proportional distribution of emergency funds
+                                            emergency_funds = remaining_investment
+                                            for item in stock_data_p:
+                                                if item['needed_band'] > 0:
+                                                    prop_alloc = (item['needed_band'] / total_needed_band) * emergency_funds
+                                                    item['invest'] += prop_alloc
+                                            remaining_investment = 0.0
+                                    
+                                    # Phase C: Proportional Gap Filling
+                                    if remaining_investment > 0 and sum_positive_deviations > 0:
+                                        funds_left = remaining_investment
+                                        proportions = []
+                                        for item in stock_data_p:
+                                            if item['below_target']:
+                                                prop_alloc = (item['deviation'] / sum_positive_deviations) * funds_left
+                                                max_inv = max(0.0, item['Gap'] - item['invest'])
+                                                ideal_invest = min(prop_alloc, max_inv)
+                                                proportions.append({'item': item, 'ideal': ideal_invest})
+                                        
+                                        for p in proportions:
+                                            p['item']['invest'] += p['ideal']
+                                            remaining_investment -= p['ideal']
+                                            
+                                    # Phase D: Leftover gap filling
+                                    if remaining_investment >= 0.01:
+                                        sorted_gaps = sorted(stock_data_p, key=lambda x: x['Gap'] - x['invest'], reverse=True)
+                                        for g in sorted_gaps:
+                                            if remaining_investment < 0.01: break
+                                            needed = max(0.0, g['Gap'] - g['invest'])
+                                            if needed > 0:
+                                                alloc = min(remaining_investment, needed)
+                                                g['invest'] += alloc
+                                                remaining_investment -= alloc
+                                                
+                                    # Update final investments from the processing pool
+                                    for item in stock_data_p:
+                                        final_investments[item['name']] = item['invest']
+
+                                # --- STEP 3: Post-Processing Rule Enforcement ---
+                                if is_dividends_p:
+                                    # 1. Enforce Integer/Floor and MinBuy of 5€
+                                    total_after_round = 0.0
+                                    for ticker, invest in final_investments.items():
+                                        if ticker.upper() == "RENE.PT":
+                                            # RENE is already processed/múltiplo do preço
+                                            total_after_round += invest
+                                            continue
+                                            
+                                        # Others: Round down to integer euros
+                                        rounded_invest = float(math.floor(invest))
+                                        
+                                        # MinBuy enforcement for PT stocks
+                                        if ticker.upper().endswith(".PT") and rounded_invest < 5.0 and rounded_invest > 0:
+                                            rounded_invest = 0.0
+                                            
+                                        final_investments[ticker] = rounded_invest
+                                        total_after_round += rounded_invest
+                                        
+                                    # 2. Redistribution of Cents ("The Dump")
+                                    # All remaining budget (including cents from RENE and floors) goes to the largest investment
+                                    final_remaining = monthly_investment - total_after_round
+                                    if final_remaining > 0:
+                                        dump_ticker = max(final_investments, key=final_investments.get)
+                                        final_investments[dump_ticker] += final_remaining
+                                        remaining_investment = 0.0
+                                    else:
+                                        remaining_investment = final_remaining
+                                else:
+                                    # Standard Portfolios (Non-Dividends)
+                                    # Just apply floor to all (as per previous standard logic)
+                                    total_after_round = 0.0
+                                    for ticker, invest in final_investments.items():
+                                        rounded = float(math.floor(invest))
+                                        final_investments[ticker] = rounded
+                                        total_after_round += rounded
+                                    
+                                    # For standard, we usually just keep the remaining in the wallet or dump it 
+                                    # to the largest gap if small. Let's keep it consistent.
+                                    final_remaining = monthly_investment - total_after_round
+                                    if final_remaining >= 1.0:
+                                        # Use standard "largest gap" redistribution for whole euros
+                                        sorted_gaps = sorted(final_investments.keys(), key=lambda x: next((s['target_allocation'] for s in live_stocks if s['name']==x), 0), reverse=True)
+                                        if sorted_gaps:
+                                            final_investments[sorted_gaps[0]] += float(math.floor(final_remaining))
+
+                                invest_map = final_investments
+
+                                    # --- END EXISTING LOGIC ---
                                 
-                                # Map investments to tickers
-                                invest_map = {row['item']['Stock']: row['invest'] for row in temp_allocs}
-                                
+                                # --- COMMON DISPLAY LOGIC ---
                                 allocations = []
                                 new_total_actual = float(total_current_live + monthly_investment)
+                                new_total_theoretical = total_current_live + monthly_investment # Ensure defined
                                 
                                 for stock in live_stocks:
                                     ticker = stock['name']
@@ -1585,7 +1591,6 @@ elif authentication_status:
                                         "New %": (new_val / new_total_actual * 100) if new_total_actual > 0 else 0
                                     })
                                 
-                                # Sort by Target % (Descending) for consistency with the Management table
                                 alloc_df = pd.DataFrame(allocations)
                                 if not alloc_df.empty:
                                     alloc_df = alloc_df.sort_values(by="Target %", ascending=False)
