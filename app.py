@@ -970,33 +970,49 @@ elif authentication_status:
                             on_change=clear_recommendations
                         )
                         
-                        target_ratios = None
-                        phase_name = "Unknown"
+                        is_retirement = selected_portfolio and "retirement" in selected_portfolio.lower()
                         
-                        if buffett_index >= 190.0:
-                            target_ratios = [45, 45, 10]
-                            phase_name = "Highly Overvalued 🏰"
-                        elif 170.0 <= buffett_index < 190.0:
-                            target_ratios = [50, 40, 10]
-                            phase_name = "Overvalued 🛡️"
-                        elif 140.0 <= buffett_index < 170.0:
-                            target_ratios = [60, 30, 10]
-                            phase_name = "Fair Value ⚖️"
-                        elif buffett_index < 140.0:
-                            target_ratios = [70, 20, 10]
-                            phase_name = "Undervalued 🚀"
-
-                        if target_ratios:
-                            st.info(f"Market Status: **{phase_name}** | Target Mix: {target_ratios}")
+                        if is_retirement:
+                            # Carteira 10/10 Logic
+                            target_spyl = 65.0 - (buffett_index - 130.0) * 0.15
+                            target_spyl = float(round(max(50.0, min(70.0, target_spyl))))
                             
-                            if len(st.session_state.stocks) >= 3:
-                                for i in range(3):
-                                    new_alloc = float(target_ratios[i])
-                                    st.session_state.stocks[i]['target_allocation'] = new_alloc
-                                    widget_key = f"{selected_portfolio}_{i}_target"
-                                    st.session_state[widget_key] = new_alloc
-                            else:
-                                st.warning("⚠️ Need at least 3 stocks to apply Market Indicator rules.")
+                            rest = 100.0 - target_spyl
+                            target_vfea = float(round(max(10.0, rest * 0.30)))
+                            target_ixua = rest - target_vfea
+                            
+                            status_msg = f"Retirement Strategy 🎯 | SPYL: {target_spyl:.0f}%, IXUA: {target_ixua:.0f}%, VFEA: {target_vfea:.0f}%"
+                            st.info(f"Market Status: **{status_msg}**")
+                            
+                            # Apply specifically to the tickers
+                            existing_tickers = {s['name'].upper() for s in st.session_state.stocks}
+                            carteira_10_10 = [("SPYL.DE", target_spyl), ("IXUA.DE", target_ixua), ("VFEA", target_vfea)]
+                            
+                            for target_ticker, target_alloc in carteira_10_10:
+                                if target_ticker in existing_tickers:
+                                    for i, stock in enumerate(st.session_state.stocks):
+                                        if stock['name'].upper() == target_ticker:
+                                            st.session_state.stocks[i]['target_allocation'] = target_alloc
+                                            st.session_state.stocks[i]['tolerance'] = 5.0  # Set deadband to 5.0%
+                                            widget_key = f"{selected_portfolio}_{i}_target"
+                                            st.session_state[widget_key] = target_alloc
+                                            break
+                                else:
+                                    # Auto-inject if missing
+                                    st.session_state.stocks.append({
+                                        "name": target_ticker,
+                                        "current_value": 0.0,
+                                        "target_allocation": target_alloc,
+                                        "tolerance": 5.0,
+                                        "expense_ratio": 0.0,
+                                        "full_name": target_ticker,
+                                        "sector": "", "industry": "", "country": "", "currency": "EUR", 
+                                        "quantity": 0.0, "average_price": 0.0, "dividend_yield": 0.0
+                                    })
+                                    idx = len(st.session_state.stocks) - 1
+                                    st.session_state[f"{selected_portfolio}_{idx}_target"] = target_alloc
+                        else:
+                            st.info("Market Indicator strategy is currently customized exclusively for the Retirement portfolio.")
                     else:
                         buffett_index = 195.0
                         
