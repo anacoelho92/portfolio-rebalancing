@@ -2821,24 +2821,32 @@ elif authentication_status:
             with tab_map["💰 Dividend Tracker"]:
                 st.session_state.footer_msg = "<b>Passive Income:</b> Track your dividend yields and growth."
                 st.subheader("💰 Dividend Tracker")
-                d_col1, d_col2 = st.columns([1, 2])
-                
-                with d_col1:
+                if True: # Record Dividend section
                     with st.container(border=True):
                         st.markdown("### ➕ Record Dividend")
                         from datetime import datetime
-                        div_date = st.date_input("Date", value=datetime.today())
-                        
                         current_portfolio_stocks = [s['name'] for s in st.session_state.stocks if s['name'] != "__PLACEHOLDER__"]
-                        if not current_portfolio_stocks:
-                            st.warning("Add stocks to your portfolio first.")
-                            div_ticker = None
-                        else:
-                            div_ticker = st.selectbox("Ticker", options=current_portfolio_stocks)
                         
-                        div_amount = st.number_input("Amount (€)", min_value=0.0, step=0.01)
+                        r_col1, r_col2, r_col3, r_col4 = st.columns(4)
                         
-                        if st.button("Add Record", width="stretch"):
+                        with r_col1:
+                            div_date = st.date_input("Date", value=datetime.today())
+                        
+                        with r_col2:
+                            if not current_portfolio_stocks:
+                                st.warning("Add stocks first.")
+                                div_ticker = None
+                            else:
+                                div_ticker = st.selectbox("Ticker", options=current_portfolio_stocks)
+                        
+                        with r_col3:
+                            div_amount = st.number_input("Amount (€)", min_value=0.0, step=0.01)
+                        
+                        with r_col4:
+                            st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                            add_clicked = st.button("Add Record", width="stretch")
+                        
+                        if add_clicked:
                             if div_ticker and div_amount > 0:
                                 new_div = {
                                     "date": str(div_date),
@@ -2855,7 +2863,7 @@ elif authentication_status:
                             else:
                                 st.error("Please select a ticker and enter an amount.")
                 
-                with d_col2:
+                if True: # Monthly Dividends section
                     with st.container(border=True):
                         st.markdown("### 📈 Monthly Dividends")
                         df_divs = st.session_state.dividends
@@ -2894,9 +2902,9 @@ elif authentication_status:
                                 # Display Totals Side-by-Side
                                 metric_col1, metric_col2 = st.columns(2)
                                 with metric_col1:
-                                    st.metric(label=f"💰 Total Dividends ({current_year})", value=f"€{total_current_year:,.2f}")
+                                    st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_current_year:,.2f}</span></div>", unsafe_allow_html=True)
                                 with metric_col2:
-                                    st.metric(label=f"💰 Total Dividends ({current_year-1})", value=f"€{total_prev_year:,.2f}")
+                                    st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year-1})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_prev_year:,.2f}</span></div>", unsafe_allow_html=True)
                                 
                                 my_divs['Month'] = my_divs['date'].dt.strftime('%b')
                                 my_divs['MonthNum'] = my_divs['date'].dt.month
@@ -2922,13 +2930,16 @@ elif authentication_status:
                                 monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
                                 monthly_stats['amount'] = monthly_stats['amount'].round(2)
                                 
-                                st.markdown("**Dividends Received (Yearly Comparison)**")
+                                st.markdown("#### 📊 Dividends Received (Yearly Comparison)")
                                 fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount', color_discrete_sequence=CHART_PALETTE)
                                 fig_div.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=10, r=10))
-                                fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=16)
+                                fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=20)
                                 fig_div.update_layout(
-                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                                    font=dict(size=16), 
+                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=16)),
+                                    legend_title=dict(font=dict(size=16)),
+                                    font=dict(size=18), 
+                                    xaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
+                                    yaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
                                     margin=dict(t=10, b=50, l=10, r=10), 
                                     paper_bgcolor='rgba(0,0,0,0)', 
                                     plot_bgcolor='rgba(0,0,0,0)'
