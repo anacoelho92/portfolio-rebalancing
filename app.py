@@ -558,15 +558,15 @@ def calculate_kids_targets(birth_date_str):
         if age <= 13:
             return {"VWCE.DE": 100.0, "VAGF.DE": 0.0}
         elif age == 14:
-            return {"VWCE.DE": 90.0, "VAGF.DE": 10.0}
+            return {"VWCE.DE": 95.0, "VAGF.DE": 5.0}
         elif age == 15:
-            return {"VWCE.DE": 85.0, "VAGF.DE": 15.0}
+            return {"VWCE.DE": 90.0, "VAGF.DE": 10.0}
         elif age == 16:
-            return {"VWCE.DE": 80.0, "VAGF.DE": 20.0}
+            return {"VWCE.DE": 85.0, "VAGF.DE": 15.0}
         elif age == 17:
-            return {"VWCE.DE": 70.0, "VAGF.DE": 30.0}
+            return {"VWCE.DE": 80.0, "VAGF.DE": 20.0}
         elif age >= 18:
-            return {"VWCE.DE": 60.0, "VAGF.DE": 40.0}
+            return {"VWCE.DE": 70.0, "VAGF.DE": 30.0}
     except Exception:
         return None
     return None
