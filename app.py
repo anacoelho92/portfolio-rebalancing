@@ -7,12 +7,77 @@ import yaml
 from yaml.loader import SafeLoader
 import os
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, date
+
+# --- PREMIUM CHART COLOR PALETTE ---
+CHART_PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F43F5E', '#84CC16', '#6366F1', '#0EA5E9']
+
+# --- UTILITY: Lifecycle Strategy ---
+def get_lifecycle_strategy(birth_date_str):
+    """Calculates age and returns the strategic allocation based on Lifecycle Phase."""
+    try:
+        from datetime import datetime, date
+        birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+        today = date.today()
+        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    except (ValueError, TypeError):
+        age = 34 # Default fallback
+
+    # Table Mapping
+    if age < 40:
+        return {
+            'age': age,
+            'phase': 'Phase: 34–40y - Maximum Growth',
+            'acc': {'stocks': 93.0, 'bonds': 4.0, 'gold': 3.0},
+            'div': {'stocks': 90.0, 'bonds': 7.0, 'gold': 3.0}
+        }
+    elif age < 45:
+        return {
+            'age': age,
+            'phase': 'Phase: 40–45y - Balanced Growth',
+            'acc': {'stocks': 91.0, 'bonds': 5.0, 'gold': 4.0},
+            'div': {'stocks': 88.0, 'bonds': 8.0, 'gold': 4.0}
+        }
+    elif age < 50:
+        return {
+            'age': age,
+            'phase': 'Phase: 45–50y - Defensive Growth',
+            'acc': {'stocks': 88.0, 'bonds': 7.0, 'gold': 5.0},
+            'div': {'stocks': 85.0, 'bonds': 10.0, 'gold': 5.0}
+        }
+    elif age < 55:
+        return {
+            'age': age,
+            'phase': 'Phase: 50–55y - Moderate Protection',
+            'acc': {'stocks': 85.0, 'bonds': 9.0, 'gold': 6.0},
+            'div': {'stocks': 82.0, 'bonds': 12.0, 'gold': 6.0}
+        }
+    elif age < 60:
+        return {
+            'age': age,
+            'phase': 'Phase: 55–60y - Capital Protection',
+            'acc': {'stocks': 80.0, 'bonds': 12.0, 'gold': 8.0},
+            'div': {'stocks': 80.0, 'bonds': 14.0, 'gold': 6.0}
+        }
+    elif age < 65:
+        return {
+            'age': age,
+            'phase': 'Phase: 60–65y - Conservative',
+            'acc': {'stocks': 75.0, 'bonds': 15.0, 'gold': 10.0},
+            'div': {'stocks': 70.0, 'bonds': 18.0, 'gold': 12.0}
+        }
+    else: # 65-67+
+        return {
+            'age': age,
+            'phase': 'Phase: 65–67y - Capital Preservation',
+            'acc': {'stocks': 70.0, 'bonds': 20.0, 'gold': 10.0},
+            'div': {'stocks': 60.0, 'bonds': 30.0, 'gold': 10.0}
+        }
 
 # Load environment variables
 load_dotenv(override=True)
 
-st.set_page_config(page_title="Portfolio Master", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Portfolio Manager", page_icon="🚀", layout="wide")
 
 # --- Dashboard Redesign Styling ---
 st.markdown("""
@@ -30,6 +95,16 @@ st.markdown("""
 
     .stApp {
         background-color: var(--bg-dark);
+    }
+    
+    /* Increase Tabs Font Size */
+    button[data-baseweb="tab"] p {
+        font-size: 1.15rem !important;
+        font-weight: 600 !important;
+    }
+    button[data-baseweb="tab"] div {
+        font-size: 1.15rem !important;
+        font-weight: 600 !important;
     }
 
     /* Sidebar Styling (Light Mode) */
@@ -552,23 +627,14 @@ if authentication_status is False:
 elif authentication_status is None:
     st.warning('Please enter your username and password')
 elif authentication_status:
-    with st.sidebar:
-        authenticator.logout('Logout', 'main')
-        st.write(f'Welcome *{name}*')
-        st.divider()
-
-    # --- MAIN APP LOGIC STARTS HERE ---
-    st.title("🚀 Portfolio Master: Allocation & Analytics")
+    # --- Main Title (Top Level) ---
+    st.title("🚀 Portfolio Manager: Allocation & Analytics")
     st.markdown("Optimization, Dividend Tracking, and Portfolio Analytics")
+    # st.divider()
 
-    # Initialize dynamic footer message
-    if 'footer_msg' not in st.session_state:
-        st.session_state.footer_msg = "<b>Smart Rebalancing:</b> Maintain your risk profile with disciplined allocation."
-    
     # Initialize GSheets connection
     from streamlit_gsheets import GSheetsConnection
     conn = st.connection("gsheets", type=GSheetsConnection)
-
 
     # Load data from Google Sheets into Session State
     if 'master_data' not in st.session_state:
@@ -588,7 +654,7 @@ elif authentication_status:
                 'portfolio_use_indicators', 'portfolio_buffett_index',
                 'stock_full_name', 'sector', 'industry', 'country', 'currency', 
                 'quantity', 'average_price', 'dividend_yield', 'portfolio_type',
-                'portfolio_birth_date', 'portfolio_uninvested_cash', 'current_price'
+                'portfolio_birth_date', 'portfolio_uninvested_cash', 'current_price', 'investor_birth_date'
             ]
             
             if raw_data.empty:
@@ -602,6 +668,7 @@ elif authentication_status:
                         elif col == 'portfolio_type': raw_data[col] = 'Other'
                         elif col == 'portfolio_birth_date': raw_data[col] = ''
                         elif col == 'portfolio_uninvested_cash': raw_data[col] = 0.0
+                        elif col == 'investor_birth_date': raw_data[col] = '1992-01-01' # Default starting point (34y approx)
                         elif col in ['current_value', 'target_allocation', 'tolerance', 'expense_ratio', 'quantity', 'average_price', 'dividend_yield', 'current_price']: raw_data[col] = 0.0
                         else: raw_data[col] = ''
                         
@@ -639,9 +706,51 @@ elif authentication_status:
 
     data = st.session_state.master_data
 
-    # Filter for current user
-    user_all_data = data[data['username'] == username]
-    
+    with st.sidebar:
+        # 1. Logout & Welcome
+        authenticator.logout('Logout', 'main')
+        st.write(f'Welcome *{name}*')
+        
+        # 1. Global Total Invested
+        user_all_data = data[data['username'] == username] if not data.empty else pd.DataFrame()
+        
+        global_total = 0.0
+        merged_global = pd.DataFrame()
+        
+        if not user_all_data.empty:
+            valid_data = user_all_data[user_all_data['stock_name'] != '__PLACEHOLDER__'].copy()
+            
+            # Separate Gold and Bonds into their own distinct slices
+            gold_mask = valid_data['stock_name'] == "EGNL.UK"
+            bonds_mask = valid_data['stock_name'] == "IBTE.UK"
+            valid_data.loc[gold_mask, 'portfolio_name'] = "Gold"
+            valid_data.loc[bonds_mask, 'portfolio_name'] = "Bonds"
+            
+            merged_global = valid_data.groupby('portfolio_name')['current_value'].sum().reset_index()
+            merged_global.rename(columns={'current_value': 'total_value'}, inplace=True)
+            merged_global = merged_global[merged_global['total_value'] > 0]
+            
+            global_total = merged_global['total_value'].sum()
+
+        st.markdown(
+            f"""
+            <style>
+            .green-text-force {{
+                color: #10B981 !important;
+                -webkit-text-fill-color: #10B981 !important;
+                font-size: 2.2rem !important;
+                font-weight: 900 !important;
+            }}
+            </style>
+            <div style="padding-top: 10px; line-height: 1.2;">
+                <div style="color: #1f2937; font-size: 1.8rem; font-weight: 800;">💵 Total Value</div>
+                <div class="green-text-force" style="color: #10B981 !important; font-size: 2.2rem !important; font-weight: 900 !important; padding-left: 2.3rem; margin-top: -5px;">€{global_total:,.2f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.divider()
+
     # --- Data Filtering & Initialization (Top Level) ---
 
     # Determine existing portfolios
@@ -649,14 +758,17 @@ elif authentication_status:
         existing_portfolios = sorted(user_all_data['portfolio_name'].unique().tolist())
     else:
         existing_portfolios = []
-
+    portfolio_options = ["🌍 Global Overview"] + existing_portfolios
+    
     # Handle auto-selection after creation
     default_index = 0
     if 'new_portfolio_created' in st.session_state:
         target_new = st.session_state.new_portfolio_created
         if target_new in existing_portfolios:
-            default_index = existing_portfolios.index(target_new)
+            default_index = existing_portfolios.index(target_new) + 1
         # We don't delete it yet, we need it for the widget default
+    elif st.session_state.get('last_selected_portfolio') in portfolio_options:
+        default_index = portfolio_options.index(st.session_state.get('last_selected_portfolio'))
     
     # We need a temporary key for the selector to avoid duplication issues if we move it
     selected_portfolio = None
@@ -667,12 +779,14 @@ elif authentication_status:
 
     # --- Sidebar UI ---
     with st.sidebar:
+
+
         # 1. Portfolios Section
         with st.expander("📂 Portfolios", expanded=True):
-            if existing_portfolios:
+            if portfolio_options:
                 selected_portfolio = st.selectbox(
-                    "Select Portfolio", 
-                    existing_portfolios, 
+                    "Select View", 
+                    portfolio_options, 
                     index=default_index, 
                     key="portfolio_selector",
                     on_change=reset_portfolio_state
@@ -709,10 +823,14 @@ elif authentication_status:
                         reset_portfolio_state()
                         st.success(f"Created '{new_portfolio_input}'!")
                         st.rerun()
+                    elif new_portfolio_input in existing_portfolios:
+                        st.error("A portfolio with this name already exists.")
+                    else:
+                        st.error("Please enter a valid name.")
 
 
             # Rename Portfolio
-            if selected_portfolio:
+            if selected_portfolio and selected_portfolio != "🌍 Global Overview":
                 with st.expander(f"⚙️ Portfolio Settings"):
                     # Get current type for default
                     current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Other"
@@ -734,32 +852,30 @@ elif authentication_status:
                             mask = (st.session_state.master_data['username'] == username) & \
                                    (st.session_state.master_data['portfolio_name'] == selected_portfolio)
                             
+                            updated_data = st.session_state.master_data.copy()
+                            
                             if name_changed:
-                                st.session_state.master_data.loc[mask, 'portfolio_name'] = new_name_input
-                                success_msg = f"Renamed to '{new_name_input}'"
+                                updated_data.loc[mask, 'portfolio_name'] = new_name_input
                                 final_name = new_name_input
                             else:
                                 final_name = selected_portfolio
-                                success_msg = "Settings updated"
-
+                                
                             if type_changed:
-                                st.session_state.master_data.loc[mask, 'portfolio_type'] = new_type_input
-                                success_msg += " and type updated" if name_changed else "Type updated"
-
-                            conn.update(worksheet="Portfolios", data=st.session_state.master_data)
-                            
-                            st.session_state.new_portfolio_created = final_name
+                                updated_data.loc[mask, 'portfolio_type'] = new_type_input
+                                
+                            st.session_state.master_data = updated_data
+                            conn.update(worksheet="Portfolios", data=updated_data)
                             st.session_state.has_unsaved_changes = False # Just synced
                             reset_portfolio_state()
-                            st.success(f"{success_msg}!")
+                            
+                            st.session_state.new_portfolio_created = final_name # Use this to auto-select renamed portfolio
+                            st.success(f"Settings saved for '{final_name}'!")
                             st.rerun()
-                        elif new_name_input in existing_portfolios:
-                            st.error("A portfolio with this name already exists.")
                         else:
                             st.error("Please enter a valid name.")
 
             # Delete Portfolio
-            if selected_portfolio:
+            if selected_portfolio and selected_portfolio != "🌍 Global Overview":
                 with st.expander(f"⚠️ Delete '{selected_portfolio}'"):
                     st.warning("This action cannot be undone.")
                     if st.button("Confirm Delete", type="primary", key="delete_portfolio_btn"):
@@ -773,8 +889,6 @@ elif authentication_status:
                         st.toast(f"Deleted portfolio: {selected_portfolio}")
                         st.rerun()
         
-        pass
-
     # --- Sync Data Logic (Source of Truth) ---
     # Load current stocks from Master data (Persistent state)
     # This list reflects the state AT THE START of the run.
@@ -829,16 +943,8 @@ elif authentication_status:
                 except (ValueError, TypeError):
                     st.session_state[f"{selected_portfolio}_uninvested_cash"] = 0.0
                 
-                # Auto-update targets for Kids portfolios on load (child got older)
-                if p_type == "Kids" and st.session_state[f"{selected_portfolio}_birth_date"]:
-                    kids_targets = calculate_kids_targets(st.session_state[f"{selected_portfolio}_birth_date"])
-                    if kids_targets:
-                        for ticker, target in kids_targets.items():
-                            for stock in st.session_state.stocks:
-                                if stock['name'] == ticker:
-                                    stock['target_allocation'] = target
-                                    break
-
+                st.session_state[f"{selected_portfolio}_investor_birth_date"] = first_row.get('investor_birth_date', '1992-01-01')
+                
             for idx, stock in enumerate(st.session_state.stocks):
                 key_prefix = f"{selected_portfolio}_{idx}"
                 st.session_state[f"{key_prefix}_name"] = stock['name']
@@ -846,11 +952,34 @@ elif authentication_status:
                 st.session_state[f"{key_prefix}_target"] = float(stock['target_allocation'])
                 st.session_state[f"{key_prefix}_tolerance"] = float(stock.get('tolerance', 0.0))
 
+        # --- Dynamic Overrides (Run every rerun to catch Birth Date changes) ---
+        if selected_portfolio and 'stocks' in st.session_state:
+            # 1. Kids Targets
+            if p_type == "Kids" and st.session_state.get(f"{selected_portfolio}_birth_date"):
+                kids_targets = calculate_kids_targets(st.session_state[f"{selected_portfolio}_birth_date"])
+                if kids_targets:
+                    for ticker, target in kids_targets.items():
+                        for stock in st.session_state.stocks:
+                            if stock['name'] == ticker:
+                                stock['target_allocation'] = target
+                                break
+
+            # 2. Gold & Bonds Targets (Lifecycle)
+            if p_type == "Gold & Bonds":
+                lc_strat = get_lifecycle_strategy("1992-01-01")
+                for stock in st.session_state.stocks:
+                    if stock['name'].upper() == "EGNL.UK":
+                        stock['target_allocation'] = lc_strat['acc']['gold']
+                        stock['tolerance'] = lc_strat['div']['gold']
+                    elif stock['name'].upper() == "IBTE.UK":
+                        stock['target_allocation'] = lc_strat['acc']['bonds']
+                        stock['tolerance'] = lc_strat['div']['bonds']
+
     # Sidebar utilities (Configuration and Indicators)
     with st.sidebar:
         if selected_portfolio:
             # 2. Configuration Section
-            if p_type in ["Dividends", "Kids", "Accumulation", "Gold & Bonds", "Other"]:
+            if p_type in ["Dividends", "Kids", "Accumulation", "Other"]:
                 # Default expander behavior: auto-expand for 'Kids' to set birth date, others remain collapsed
                 with st.expander("⚙️ Configuration", expanded=(p_type == "Kids")):
                     if p_type == "Kids":
@@ -904,6 +1033,7 @@ elif authentication_status:
                                 st.toast("👶 Age-based targets updated!", icon="✅")
                                 st.rerun()
 
+
                     # Calculate Current Month's Dividends (for Dividends Portfolios)
                     current_month_divs = 0.0
                     if p_type == "Dividends":
@@ -922,15 +1052,18 @@ elif authentication_status:
 
                     monthly_investment_key = f"{selected_portfolio}_monthly_invest"
                     
-                    base_investment = st.number_input(
-                        "Monthly Investment Amount (€)",
-                        min_value=0.0,
-                        value=st.session_state.get(monthly_investment_key, 1000.0),
-                        key=monthly_investment_key,
-                        step=100.0,
-                        help="Base amount you want to invest this month",
-                        on_change=clear_recommendations
-                    )
+                    if p_type != "Gold & Bonds":
+                        base_investment = st.number_input(
+                            "Monthly Investment Amount (€)",
+                            min_value=0.0,
+                            value=st.session_state.get(monthly_investment_key, 1000.0),
+                            key=monthly_investment_key,
+                            step=100.0,
+                            help="Base amount you want to invest this month",
+                            on_change=clear_recommendations
+                        )
+                    else:
+                        base_investment = 0.0
                     
                     # Update global monthly_investment for calculations
                     if p_type == "Dividends":
@@ -1166,21 +1299,60 @@ elif authentication_status:
 
 
     # Main content
-    if selected_portfolio:
+    if selected_portfolio == "🌍 Global Overview":
+        st.markdown("## 🌍 Global Portfolio Overview")
+        st.divider()
+        if not merged_global.empty:
+            fig_global = px.pie(merged_global, values='total_value', names='portfolio_name', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+            fig_global.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(t=30, b=30, l=40, r=40),
+                showlegend=False,
+                height=450
+            )
+            fig_global.update_traces(
+                textposition='outside',
+                textinfo='percent+label', 
+                textfont=dict(size=15),
+                hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
+                marker=dict(line=dict(color='rgba(0,0,0,0)', width=0))
+            )
+            st.plotly_chart(fig_global, use_container_width=True)
+        else:
+            st.info("No value invested yet or no data available.")
+    elif selected_portfolio:
         # Synchronize "live" values for calculations (Summary/Recommendations) 
         # Source of truth is now exclusively st.session_state.stocks (synced with Editor)
-        live_stocks = st.session_state.stocks.copy() if 'stocks' in st.session_state else []
+        import copy
+        live_stocks = copy.deepcopy(st.session_state.stocks) if 'stocks' in st.session_state else []
+        
+        # Hard-enforce Omnibus logic targeting overrides for KPIs and Charts globally
+        lc_strat = get_lifecycle_strategy("1992-01-01")
+        for s in live_stocks:
+            if s['name'] == "EGNL.UK":
+                s['target_allocation'] = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
+                s['tolerance'] = 0.0
+            elif s['name'] == "IBTE.UK":
+                s['target_allocation'] = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
+                s['tolerance'] = 0.0
 
         # --- Top Row: KPI Cards ---
-        total_current = sum(s['current_value'] for s in live_stocks)
-        total_target = sum(s['target_allocation'] for s in live_stocks)
+        total_current = sum(s['current_value'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
+        total_target = sum(s['target_allocation'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
         num_stocks = len(live_stocks)
         
         # Dashboard Header
         st.markdown(f"## 📊 {selected_portfolio} Dashboard")
         
-        # Calculate Current Weighted TER for KPI (including all assets)
+        # Lifecycle Info Display (Exclusively for Gold & Bonds)
+        if p_type == "Gold & Bonds":
+            strategy = get_lifecycle_strategy('1992-01-01')
+            st.info(f"🧬 **{strategy['phase']}** (Investor Age: {strategy['age']})")
+        
+        # Calculate Current Weighted TER for KPI (including all assets in THIS selected portfolio)
         total_ter_sum = 0.0
+        portfolio_total_all_assets = sum(float(s.get('current_value', 0.0)) for s in live_stocks)
         
         for s in live_stocks:
             try:
@@ -1190,7 +1362,7 @@ elif authentication_status:
             except (ValueError, TypeError):
                 continue
                 
-        weighted_ter = (total_ter_sum / total_current) if total_current > 0 else 0.0
+        weighted_ter = (total_ter_sum / portfolio_total_all_assets) if portfolio_total_all_assets > 0 else 0.0
 
         if p_type == "Stocks":
             # Calculate Unique Sectors
@@ -1210,33 +1382,97 @@ elif authentication_status:
                 acc_ports = master_df[user_mask & (master_df['portfolio_type'] == "Accumulation")]
                 div_ports = master_df[user_mask & (master_df['portfolio_type'] == "Dividends")]
                 
-                acc_val = float(acc_ports['current_value'].sum())
-                div_val = float(div_ports['current_value'].sum())
+                acc_port_name = acc_ports['portfolio_name'].iloc[0] if not acc_ports.empty else "Accumulation"
+                div_port_name = div_ports['portfolio_name'].iloc[0] if not div_ports.empty else "Dividends"
                 
+                acc_ports_core = acc_ports[~acc_ports['stock_name'].isin(["EGNL.UK", "IBTE.UK"])]
+                div_ports_core = div_ports[~div_ports['stock_name'].isin(["EGNL.UK", "IBTE.UK"])]
+                
+                acc_val = float(acc_ports_core['current_value'].sum())
+                div_val = float(div_ports_core['current_value'].sum())
+                
+                # Targets specifically based on Lifecycle Strategy applied to Core value
                 gold_target_val = (acc_val * 0.03) + (div_val * 0.06)
                 bond_target_val = (acc_val * 0.04) + (div_val * 0.04)
                 total_strategy_target = gold_target_val + bond_target_val
 
+                def get_sum_kpi(df, ticker):
+                    return float(df[df['stock_name'] == ticker]['current_value'].sum() if not df.empty else 0.0)
+                    
+                total_vault_current = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(div_ports, "EGNL.UK") + get_sum_kpi(acc_ports, "IBTE.UK") + get_sum_kpi(div_ports, "IBTE.UK")
+
+                # Individual Gaps for Breakdown
+                current_gold = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(div_ports, "EGNL.UK")
+                current_bonds = get_sum_kpi(acc_ports, "IBTE.UK") + get_sum_kpi(div_ports, "IBTE.UK")
+                
+                gold_diff = current_gold - gold_target_val
+                bond_diff = current_bonds - bond_target_val
+                
+                gold_status = f"✅ €{gold_target_val:,.2f}" if gold_diff >= 0 else f"€{abs(gold_diff):,.2f}"
+                bond_status = f"✅ €{bond_target_val:,.2f}" if bond_diff >= 0 else f"€{abs(bond_diff):,.2f}"
+
+                # Portfolio-level Gaps
+                # Acc Target: Gold(3%) + Bonds(4%) | Div Target: Gold(6%) + Bonds(4%)
+                acc_vault_target = (acc_val * 0.03) + (acc_val * 0.04)
+                div_vault_target = (div_val * 0.06) + (div_val * 0.04)
+                
+                acc_vault_curr = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(acc_ports, "IBTE.UK")
+                div_vault_curr = get_sum_kpi(div_ports, "EGNL.UK") + get_sum_kpi(div_ports, "IBTE.UK")
+                
+                acc_gap_val = acc_vault_curr - acc_vault_target
+                div_gap_val = div_vault_curr - div_vault_target
+                
+                acc_status = f"✅ Target €{acc_vault_target:,.2f}" if acc_gap_val >= 0 else f"€{abs(acc_gap_val):,.2f}"
+                div_status = f"✅ Target €{div_vault_target:,.2f}" if div_gap_val >= 0 else f"€{abs(div_gap_val):,.2f}"
+
+                # Recalculate Weighted TER for Gold & Bonds using actual vault values
+                gold_ter = 0.0
+                bonds_ter = 0.0
+                
+                if not master_df.empty:
+                    # Look up TER from across all portfolios where the user might have defined it
+                    egnl_mask = (master_df['username'] == username) & (master_df['stock_name'] == "EGNL.UK")
+                    ibte_mask = (master_df['username'] == username) & (master_df['stock_name'] == "IBTE.UK")
+                    
+                    if egnl_mask.any():
+                        ter_val = master_df.loc[egnl_mask, 'expense_ratio'].max()
+                        if pd.notna(ter_val):
+                            gold_ter = float(ter_val)
+                            
+                    if ibte_mask.any():
+                        ter_val = master_df.loc[ibte_mask, 'expense_ratio'].max()
+                        if pd.notna(ter_val):
+                            bonds_ter = float(ter_val)
+
+                
+                if total_vault_current > 0:
+                    weighted_ter = ((current_gold * gold_ter) + (current_bonds * bonds_ter)) / total_vault_current
+                else:
+                    weighted_ter = 0.0
+
                 # Row 1: Primary Stats
-                row1_cols = st.columns(2)
-                with row1_cols[0]: render_kpi_card("Total Current", f"€{total_current:,.2f}")
+                row1_cols = st.columns(3)
+                with row1_cols[0]: render_kpi_card("Current Value", f"€{total_vault_current:,.2f}")
                 
-                diff = total_current - total_strategy_target
-                status_txt = "✅ On Target" if diff >= 0 else f"🛠️ Gap: €{abs(diff):,.2f}"
-                with row1_cols[1]: render_kpi_card("Total Target (7%+10%)", status_txt)
-                
+                diff = total_vault_current - total_strategy_target
+                status_txt = "✅ Gold/Bonds at Target" if diff >= 0 else f"€{abs(diff):,.2f}"
+                with row1_cols[1]: render_kpi_card("Gap to Target (Total)", status_txt)
+                with row1_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
+
                 # Row 2: Detailed Breakdown
-                row2_cols = st.columns(3)
-                with row2_cols[0]: render_kpi_card("Bonds Alvo (IBTE.UK)", f"€{bond_target_val:,.2f}")
-                with row2_cols[1]: render_kpi_card("Gold Alvo (EGNL.UK)", f"€{gold_target_val:,.2f}")
-                with row2_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
+                # st.markdown("---")
+                # st.markdown("##### 📍 Gaps Breakdown")
+                row2_cols = st.columns(4)
+                with row2_cols[0]: render_kpi_card("Gap to Target (Bonds)", bond_status)
+                with row2_cols[1]: render_kpi_card("Gap to Target (Gold)", gold_status)
+                with row2_cols[2]: render_kpi_card(f"Gap to Target ({acc_port_name})", acc_status)
+                with row2_cols[3]: render_kpi_card(f"Gap to Target ({div_port_name})", div_status)
             else:
-                kpi_cols = st.columns(5)
+                kpi_cols = st.columns(4)
                 with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
                 with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
-                with kpi_cols[2]: render_kpi_card("Target Spread", f"{total_target:.1f}%")
-                with kpi_cols[3]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
-                with kpi_cols[4]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
+                with kpi_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
+                with kpi_cols[3]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
         
         if p_type not in ["Stocks", "Gold & Bonds"] and abs(total_target - 100.0) > 0.01:
             st.warning("⚠️ Your target allocations do not sum to 100%. Please adjust them in Portfolio Management.")
@@ -1248,8 +1484,15 @@ elif authentication_status:
             tab_list = ["📈 Portfolio Details", "🪙 Uninvested Cash"]
         elif p_type == "Dividends":
             tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
+        elif p_type == "Gold & Bonds":
+            tab_list = ["🏦 Omnibus Vault", "🪙 Uninvested Cash"]
         else: # Other
             tab_list = ["📊 Manage Portfolio", "🪙 Uninvested Cash"]
+            
+        if selected_portfolio and "conviction" in selected_portfolio.lower():
+            if "🪙 Uninvested Cash" in tab_list:
+                tab_list.remove("🪙 Uninvested Cash")
+
             
         tabs = st.tabs(tab_list)
         
@@ -1259,6 +1502,10 @@ elif authentication_status:
         if "📊 Manage Portfolio" in tab_map:
             with tab_map["📊 Manage Portfolio"]:
                 st.session_state.footer_msg = "<b>Smart Rebalancing:</b> Maintain your risk profile with disciplined allocation."
+                uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                if uninvested_cash > 0:
+                    st.info(f"💡 You have **€{uninvested_cash:,.2f}** of uninvested cash. You can manage it in the 'Uninvested Cash' tab.", icon="🪙")
+                    
                 col_main, col_side = st.columns([2, 1])
         
                 with col_main:
@@ -1279,15 +1526,16 @@ elif authentication_status:
                             available_core = [c for c in core_cols if c in current_stocks_df.columns]
                             current_stocks_df = current_stocks_df[available_core]
 
-                            # Special handling for Gold & Bonds UI (Virtual columns)
-                            if p_type == "Gold & Bonds":
-                                # Pre-fill values for the UI
-                                if "EGNL.UK" in current_stocks_df.index:
-                                    current_stocks_df.loc["EGNL.UK", "target_allocation"] = 3.0
-                                    current_stocks_df.loc["EGNL.UK", "tolerance"] = 6.0
-                                if "IBTE.UK" in current_stocks_df.index:
-                                    current_stocks_df.loc["IBTE.UK", "target_allocation"] = 4.0
-                                    current_stocks_df.loc["IBTE.UK", "tolerance"] = 4.0
+                            # Auto-force Lifecycle Targets for Gold & Bonds inside any Portfolio
+                            lc_strat = get_lifecycle_strategy("1992-01-01")
+                            if "EGNL.UK" in current_stocks_df.index:
+                                target_weight_gold = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
+                                current_stocks_df.loc["EGNL.UK", "target_allocation"] = target_weight_gold
+                                current_stocks_df.loc["EGNL.UK", "tolerance"] = 0.0 # Force tolerance to 0 for precision
+                            if "IBTE.UK" in current_stocks_df.index:
+                                target_weight_bonds = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
+                                current_stocks_df.loc["IBTE.UK", "target_allocation"] = target_weight_bonds
+                                current_stocks_df.loc["IBTE.UK", "tolerance"] = 0.0
                         else:
                             current_stocks_df = pd.DataFrame(columns=["current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
                             current_stocks_df.index.name = "name"
@@ -1297,15 +1545,12 @@ elif authentication_status:
                             "name": st.column_config.TextColumn("Ticker", required=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn(
-                                "Target %" if p_type != "Gold & Bonds" else "% Accumulation", 
-                                min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", 
-                                disabled=(p_type in ["Kids", "Gold & Bonds"])
+                                "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", 
+                                disabled=(p_type in ["Kids"])
                             ),
                             "current_price": st.column_config.NumberColumn("Price (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "tolerance": st.column_config.NumberColumn(
-                                "Tolerance %" if p_type != "Gold & Bonds" else "% Dividends", 
-                                min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%",
-                                disabled=(p_type == "Gold & Bonds")
+                                "Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"
                             ),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -1396,6 +1641,7 @@ elif authentication_status:
                             except:
                                 portfolio_uninvested_cash = 0.0
                             portfolio_type = p_type
+                            portfolio_investor_birth = st.session_state.get(f"{selected_portfolio}_investor_birth_date", '1992-01-01')
         
                             mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
                             
@@ -1410,6 +1656,7 @@ elif authentication_status:
                                     portfolio_use_ind != fr.get('portfolio_use_indicators', False) or
                                     portfolio_birth_date != fr.get('portfolio_birth_date', '') or
                                     abs(portfolio_uninvested_cash - fr_cash) > 0.01 or
+                                    portfolio_investor_birth != fr.get('investor_birth_date', '1992-01-01') or
                                     abs(portfolio_buffett - fr.get('portfolio_buffett_index', 195.0)) > 0.1):
                                     any_content_changes = True
                                     data.loc[mask, 'portfolio_monthly_invest'] = portfolio_invest
@@ -1417,6 +1664,7 @@ elif authentication_status:
                                     data.loc[mask, 'portfolio_buffett_index'] = portfolio_buffett
                                     data.loc[mask, 'portfolio_birth_date'] = portfolio_birth_date
                                     data.loc[mask, 'portfolio_uninvested_cash'] = portfolio_uninvested_cash
+                                    data.loc[mask, 'investor_birth_date'] = portfolio_investor_birth
                             
                             # 2. Update Stock Data (Refactored for Data Editor)
                             # We rebuild the rows for this portfolio entirely from the edited_df
@@ -1438,11 +1686,12 @@ elif authentication_status:
                                         "current_price": row.get('current_price', 0.0),
                                         "tolerance": row['tolerance'],
                                         "expense_ratio": row.get('expense_ratio', 0.0),
-                                         "portfolio_monthly_invest": portfolio_invest,
+                                        "portfolio_monthly_invest": portfolio_invest,
                                         "portfolio_use_indicators": portfolio_use_ind,
                                         "portfolio_buffett_index": portfolio_buffett,
                                         "portfolio_birth_date": portfolio_birth_date,
                                         "portfolio_uninvested_cash": portfolio_uninvested_cash,
+                                        "investor_birth_date": portfolio_investor_birth,
                                         "portfolio_type": portfolio_type,
                                         "stock_full_name": row.get('full_name', ''),
                                         "sector": row.get('sector', ''),
@@ -1492,94 +1741,62 @@ elif authentication_status:
                     with st.container(border=True):
                         st.subheader("🎯 Action Center")
                         if st.button("🧮 Calculate Allocation", width="stretch"):
-                            live_stocks = st.session_state.stocks # Use the updated state
-                            total_current_live = sum(s['current_value'] for s in live_stocks)
-                            total_target_live = sum(s['target_allocation'] for s in live_stocks)
+                            import copy
+                            live_stocks = copy.deepcopy(st.session_state.stocks)
+                            
+                            # Hard-enforce Omnibus target reservations during calculation
+                            lc_strat = get_lifecycle_strategy("1992-01-01")
+                            for s in live_stocks:
+                                if s['name'] == "EGNL.UK":
+                                    s['target_allocation'] = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
+                                    s['tolerance'] = 0.0
+                                elif s['name'] == "IBTE.UK":
+                                    s['target_allocation'] = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
+                                    s['tolerance'] = 0.0
+                                    
+                            total_current_global = sum(s['current_value'] for s in live_stocks)
+                            core_target_live = sum(s['target_allocation'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
         
-                            # Skip 100% check for Gold & Bonds (as it has dynamic funding)
-                            if p_type != "Gold & Bonds" and abs(total_target_live - 100.0) > 0.01:
-                                st.error(f"Ratios sum to {total_target_live:.1f}%, must be 100%")
+                            # The Core stocks must strictly sum to 100%
+                            if p_type != "Gold & Bonds" and abs(core_target_live - 100.0) > 0.01:
+                                st.error(f"As suas ações base somam {core_target_live:.1f}%. Ajuste para que somem exatamente 100% (o Ouro e Obrigações são deduzidos à parte de forma transparente).")
                             else:
                                 import math
                                 
                                 # Current local Monthly Investment (from Sidebar or Auto)
                                 current_monthly_base = float(monthly_investment) 
-                                
-                                # Global data fetch for cross-portfolio logic
-                                master_df = st.session_state.master_data
-                                user_mask = master_df['username'] == username
-                                
-                                acc_ports = master_df[user_mask & (master_df['portfolio_type'] == "Accumulation")]
-                                div_ports = master_df[user_mask & (master_df['portfolio_type'] == "Dividends")]
-                                
-                                acc_val = float(acc_ports['current_value'].sum())
-                                div_val = float(div_ports['current_value'].sum())
-                                
-                                # Strategic Check for Gold & Bonds "On Target" Status
-                                gb_ports = master_df[user_mask & (master_df['portfolio_type'] == "Gold & Bonds")]
-                                total_gb_current = float(gb_ports['current_value'].sum())
-                                
-                                target_gold_val = (acc_val * 0.03) + (div_val * 0.06)
-                                target_bond_val = (acc_val * 0.04) + (div_val * 0.04)
-                                strategy_target = target_gold_val + target_bond_val
-                                
-                                strategy_on_target = total_gb_current >= strategy_target if strategy_target > 0 else True
-                                
-                                # Budget diversion: using the UNIQUE budgets to avoid doubling if multiple stocks exist
-                                acc_budget = float(acc_ports['portfolio_monthly_invest'].unique().sum())
-                                div_budget = float(div_ports['portfolio_monthly_invest'].unique().sum())
-
-                                # Override current budget based on diversion rules
-                                if p_type == "Accumulation":
-                                    if strategy_on_target:
-                                        current_monthly_base = acc_budget
-                                        st.success(f"✅ Gold & Bonds strategy is On Target! Using 100% of budget (€{acc_budget:,.2f}) internally.")
-                                    else:
-                                        current_monthly_base = acc_budget * 0.93
-                                        st.info(f"💡 Accumulation rule: using 93% of budget (€{acc_budget} → €{current_monthly_base:,.2f})")
-                                elif p_type == "Dividends":
-                                    # Base investment + Dividends, then 90%
-                                    total_budget = float(monthly_investment) # This already includes divs from sidebar logic
-                                    if strategy_on_target:
-                                        current_monthly_base = total_budget
-                                        st.success(f"✅ Gold & Bonds strategy is On Target! Using 100% of total budget (€{total_budget:,.2f}) internally.")
-                                    else:
-                                        current_monthly_base = total_budget * 0.90
-                                        st.info(f"💡 Dividends rule: using 90% of total budget (€{total_budget:,.2f} → €{current_monthly_base:,.2f})")
-                                elif p_type == "Gold & Bonds":
-                                    if strategy_on_target:
-                                        current_monthly_base = 0.0
-                                        st.success(f"✅ Gold & Bonds is On Target! No additional investment recommended.")
-                                    else:
-                                        gold_portion_budget = (acc_budget * 0.03) + (div_budget * 0.06)
-                                        bond_portion_budget = (acc_budget * 0.04) + (div_budget * 0.04)
-                                        current_monthly_base = gold_portion_budget + bond_portion_budget
-                                        st.info(f"💡 Gold & Bonds unified rules: €{current_monthly_base:,.2f} (Gold: €{gold_portion_budget:.2f}, Bonds: €{bond_portion_budget:.2f})")
-
                                 is_dividends_p = (p_type == "Dividends") or (selected_portfolio and "dividends" in selected_portfolio.lower())
-                                total_theoretical = total_current_live + current_monthly_base
+                                
+                                global_theoretical = total_current_global + current_monthly_base
                                 remaining_investment = float(current_monthly_base)
                                 
                                 # Initial map for all stocks
                                 final_investments = {s['name']: 0.0 for s in live_stocks}
                                 stocks_to_process = [s for s in live_stocks]
                                 
-                                # --- STEP 1: Specific Tickers for Gold & Bonds ---
-                                if p_type == "Gold & Bonds" and not strategy_on_target:
-                                    gold_portion_budget = (acc_budget * 0.03) + (div_budget * 0.06)
-                                    bond_portion_budget = (acc_budget * 0.04) + (div_budget * 0.04)
-                                    
-                                    # Fixed assignment for unified Gold & Bonds portfolio
-                                    if "EGNL.UK" in final_investments:
-                                        final_investments["EGNL.UK"] = gold_portion_budget
-                                    if "IBTE.UK" in final_investments:
-                                        final_investments["IBTE.UK"] = bond_portion_budget
-                                    
-                                    # For Gold & Bonds, we stop here as the budget is fully allocated strategically
-                                    remaining_investment = 0.0
-                                    stocks_to_process = []
+                                # --- STEP 0.5: Omnibus Interceptor (Vault) ---
+                                # Intercept fixed percentage but capped strictly by the Local Portfolio Gap
+                                for omni_ticker in ["EGNL.UK", "IBTE.UK"]:
+                                    omni_stock = next((s for s in stocks_to_process if s['name'] == omni_ticker), None)
+                                    if omni_stock:
+                                        target_val = global_theoretical * (omni_stock['target_allocation'] / 100.0)
+                                        gap = max(0.0, target_val - omni_stock['current_value'])
+                                        
+                                        # Strict Cap: Cannot exceed its structural slice of the new cash, nor its local gap.
+                                        max_slice = current_monthly_base * (omni_stock['target_allocation'] / 100.0)
+                                        alloc = min(max_slice, gap)
+                                        
+                                        final_investments[omni_ticker] = alloc
+                                        remaining_investment -= alloc
+                                        
+                                # Remove Omnibus from Core Processing Group
+                                stocks_to_process = [s for s in stocks_to_process if s['name'] not in ("EGNL.UK", "IBTE.UK")]
                                 
-                                # --- STEP 2: Special Handling for RENE.PT...
+                                # Formally set Rebased Totals so Core targets (which sum to 100%) distribute flawlessly
+                                total_current_live = sum(s['current_value'] for s in stocks_to_process)
+                                total_theoretical = total_current_live + remaining_investment
+                                
+                                # --- STEP 1: Special Handling for RENE.PT...
                                 if is_dividends_p:
                                     rene_stock = next((s for s in live_stocks if s['name'].upper() == "RENE.PT"), None)
                                     if rene_stock:
@@ -1776,6 +1993,15 @@ elif authentication_status:
 
                                 st.session_state.last_calculation = {"df": alloc_df, "monthly_investment": current_monthly_base, "remaining": remaining_investment}
                                 st.session_state.show_recommendations = True
+                                
+                                # Persist vault allocations per portfolio so the Hedges tab can aggregate them
+                                if 'vault_alloc_by_portfolio' not in st.session_state:
+                                    st.session_state.vault_alloc_by_portfolio = {}
+                                st.session_state.vault_alloc_by_portfolio[selected_portfolio] = {
+                                    "type": p_type,
+                                    "EGNL.UK": final_investments.get("EGNL.UK", 0.0),
+                                    "IBTE.UK": final_investments.get("IBTE.UK", 0.0),
+                                }
                         
                         if st.session_state.show_recommendations:
                             # st.divider()
@@ -1793,14 +2019,27 @@ elif authentication_status:
                         # Create a display-only version by dropping columns requested by user
                         display_df = df.drop(columns=["Target %", "Target Value"])
                         
-                        # Highlight and style. Set Index to Stock to freeze column.
-                        styled_df = display_df.set_index("Stock").style.format(precision=2).set_properties(
-                            subset=['Investment'], 
-                            **{'background-color': '#24A16F', 'color': '#065F46', 'font-weight': '700', 
-                               'border-bottom': '1px solid #065F46'}
-                        )
+                        # Always push vault tickers to the bottom
+                        vault_tickers = ["EGNL.UK", "IBTE.UK"]
+                        core_df = display_df[~display_df["Stock"].isin(vault_tickers)]
+                        vault_df = display_df[display_df["Stock"].isin(vault_tickers)]
+                        display_df = pd.concat([core_df, vault_df], ignore_index=True)
+                        
+                        # Build row-level styling (keep Stock as column, not index, to style ticker too)
+                        def style_rows(row):
+                            is_vault = row.get("Stock", "") in vault_tickers
+                            if is_vault:
+                                # Slightly lighter than Streamlit dark blue (#0e1117) page bg
+                                base = 'background-color: #1c2537;'
+                                invest_style = 'background-color: #1c2537; font-weight: 700;'
+                            else:
+                                base = ''
+                                invest_style = 'background-color: #24A16F; color: #065F46; font-weight: 700; border-bottom: 1px solid #065F46;'
+                            return [invest_style if col == 'Investment' else base for col in row.index]
+                        
+                        styled_df = display_df.style.format(precision=2).apply(style_rows, axis=1)
                         # Use st.dataframe for responsive horizontal scrolling
-                        st.dataframe(styled_df, use_container_width=True)
+                        st.dataframe(styled_df, use_container_width=True, hide_index=True)
                         
                         if st.button("💾 Log to History", width="stretch"):
                             with st.spinner("Logging..."):
@@ -1851,7 +2090,7 @@ elif authentication_status:
                     # Charts Row
                     with st.container(border=True):
                         st.subheader("📉 Allocation Visuals")
-                        df_plot = df.sort_values('Stock')
+                        df_plot = df[~df['Stock'].isin(["EGNL.UK", "IBTE.UK"])].sort_values('Stock')
                         chart_col1, chart_col2 = st.columns(2)
                         
                         dashboard_colors = ['#FF8B76', '#7BD192', '#5EB1FF', '#FFD166', '#06D6A0']
@@ -1884,9 +2123,352 @@ elif authentication_status:
                             )
                             st.plotly_chart(fig2, use_container_width=True)
 
+        if "🏦 Omnibus Vault" in tab_map:
+            with tab_map["🏦 Omnibus Vault"]:
+                st.session_state.footer_msg = "<b>Omnibus Vault:</b> Gerir o cofre físico de Ouro e Obrigações partilhado pelas suas carteiras."
+                uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                if uninvested_cash > 0:
+                    st.info(f"💡 You have **€{uninvested_cash:,.2f}** of uninvested cash. You can manage it in the 'Uninvested Cash' tab.", icon="🪙")
+                
+                master_df = st.session_state.master_data
+                user_mask = master_df['username'] == username
+                
+                # Check for legacy "Gold & Bonds" entries
+                legacy_gb = master_df[user_mask & (master_df['portfolio_type'] == "Gold & Bonds") & (master_df['stock_name'].isin(['EGNL.UK', 'IBTE.UK']))]
+                if not legacy_gb.empty:
+                    st.error("⚠️ **Ação Necessária**: Tem ativos a utilizar a versão antiga do sistema Gold & Bonds. É necessário migrar para o novo modelo de 'Cofre e Subcontas'.")
+                    if st.button("🚀 Iniciar Migração Automática", help="Divide fisicamente os valores na base de dados entre as contas de Acumulação e Dividendos, com base no peso de cada carteira."):
+                        with st.spinner("A migrar..."):
+                            data = master_df.copy()
+                            acc_ports = data[user_mask & (data['portfolio_type'] == "Accumulation")]
+                            div_ports = data[user_mask & (data['portfolio_type'] == "Dividends")]
+                            gb_ports = legacy_gb
+                            
+                            acc_val = float(acc_ports['current_value'].sum()) if not acc_ports.empty else 0.0
+                            div_val = float(div_ports['current_value'].sum()) if not div_ports.empty else 0.0
+                            total_base = acc_val + div_val
+                            
+                            if total_base == 0:
+                                acc_ratio = 0.5
+                                div_ratio = 0.5
+                            else:
+                                acc_ratio = acc_val / total_base
+                                div_ratio = div_val / total_base
+                            
+                            # Clean legacy
+                            data = data[~((data['username'] == username) & (data['portfolio_type'] == "Gold & Bonds"))]
+                            
+                            new_rows = []
+                            for _, row in gb_ports.iterrows():
+                                stock = row['stock_name']
+                                val = float(row['current_value'])
+                                
+                                acc_row = row.copy()
+                                acc_row['portfolio_type'] = "Accumulation"
+                                acc_row['portfolio_name'] = acc_ports['portfolio_name'].iloc[0] if not acc_ports.empty else "Accumulation"
+                                acc_row['current_value'] = val * acc_ratio
+                                acc_row['target_allocation'] = 0.0
+                                
+                                div_row = row.copy()
+                                div_row['portfolio_type'] = "Dividends"
+                                div_row['portfolio_name'] = div_ports['portfolio_name'].iloc[0] if not div_ports.empty else "Dividends"
+                                div_row['current_value'] = val * div_ratio
+                                div_row['target_allocation'] = 0.0
+                                
+                                new_rows.append(acc_row)
+                                new_rows.append(div_row)
+                            
+                            if new_rows:
+                                # placeholder to keep the View-Only tab valid
+                                placeholder = gb_ports.iloc[0].copy()
+                                placeholder['stock_name'] = "__PLACEHOLDER__"
+                                placeholder['current_value'] = 0.0
+                                placeholder['target_allocation'] = 0.0
+                                new_rows.append(placeholder)
+                                
+                                data = pd.concat([data, pd.DataFrame(new_rows)], ignore_index=True)
+                            
+                            conn.update(worksheet="Portfolios", data=data)
+                            st.session_state.master_data = data
+                            st.success("✅ Cofre migrado com sucesso!")
+                            st.rerun()
+                else:
+                    
+                    # Fetch current distributed values
+                    acc_df = master_df[user_mask & (master_df['portfolio_type'] == "Accumulation")]
+                    div_df = master_df[user_mask & (master_df['portfolio_type'] == "Dividends")]
+                    
+                    acc_port_name = acc_df['portfolio_name'].iloc[0] if not acc_df.empty else "Accumulation"
+                    div_port_name = div_df['portfolio_name'].iloc[0] if not div_df.empty else "Dividends"
+                    
+                    def get_sum(df, ticker):
+                        return float(df[df['stock_name'] == ticker]['current_value'].sum() if not df.empty else 0.0)
+                        
+                    acc_gold = get_sum(acc_df, "EGNL.UK")
+                    div_gold = get_sum(div_df, "EGNL.UK")
+                    total_gold = acc_gold + div_gold
+                    
+                    acc_bonds = get_sum(acc_df, "IBTE.UK")
+                    div_bonds = get_sum(div_df, "IBTE.UK")
+                    total_bonds = acc_bonds + div_bonds
+                    
+
+                    
+                    if 'omni_messages' in st.session_state and st.session_state.omni_messages:
+                        for msg_type, msg in st.session_state.omni_messages:
+                            if msg_type == 'success':
+                                st.success(msg)
+                            elif msg_type == 'error':
+                                st.error(msg)
+                            elif msg_type == 'warning':
+                                st.warning(msg)
+                        st.session_state.omni_messages = [] # Clear after showing
+                        
+                    # Create structured table
+                    lc_strat = get_lifecycle_strategy("1992-01-01")
+                    acc_total = float(acc_df['current_value'].sum() if not acc_df.empty else 0.0)
+                    div_total = float(div_df['current_value'].sum() if not div_df.empty else 0.0)
+                    
+                    target_acc_gold_eur = acc_total * (lc_strat['acc']['gold'] / 100.0)
+                    target_acc_bonds_eur = acc_total * (lc_strat['acc']['bonds'] / 100.0)
+                    target_div_gold_eur = div_total * (lc_strat['div']['gold'] / 100.0)
+                    target_div_bonds_eur = div_total * (lc_strat['div']['bonds'] / 100.0)
+                    
+                    def calc_prog(current, target):
+                        if target <= 0.0: return 100.0 if current >= 0 else 0.0
+                        return min((current / target) * 100.0, 100.0)
+
+                    acc_vault_data = []
+                    div_vault_data = []
+                    
+                    acc_vault_data.append({
+                        "Asset": "Gold (EGNL.UK)", "Current (€)": acc_gold,
+                        "Target (%)": lc_strat['acc']['gold'], "Target (€)": target_acc_gold_eur, "Progress": calc_prog(acc_gold, target_acc_gold_eur)
+                    })
+                    div_vault_data.append({
+                        "Asset": "Gold (EGNL.UK)", "Current (€)": div_gold,
+                        "Target (%)": lc_strat['div']['gold'], "Target (€)": target_div_gold_eur, "Progress": calc_prog(div_gold, target_div_gold_eur)
+                    })
+                    
+                    acc_vault_data.append({
+                        "Asset": "Bonds (IBTE.UK)", "Current (€)": acc_bonds,
+                        "Target (%)": lc_strat['acc']['bonds'], "Target (€)": target_acc_bonds_eur, "Progress": calc_prog(acc_bonds, target_acc_bonds_eur)
+                    })
+                    div_vault_data.append({
+                        "Asset": "Bonds (IBTE.UK)", "Current (€)": div_bonds,
+                        "Target (%)": lc_strat['div']['bonds'], "Target (€)": target_div_bonds_eur, "Progress": calc_prog(div_bonds, target_div_bonds_eur)
+                    })
+                        
+                    shared_column_config = {
+                        "Current (€)": st.column_config.NumberColumn(format="€%.2f"),
+                        "Target (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                        "Target (€)": st.column_config.NumberColumn(format="€%.2f"),
+                        "Progress": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100)
+                    }
+                    
+                    target_global_gold_eur = target_acc_gold_eur + target_div_gold_eur
+                    target_global_bonds_eur = target_acc_bonds_eur + target_div_bonds_eur
+                    
+                    global_vault_data = [
+                        {
+                            "Asset": "Gold (EGNL.UK)", 
+                            "Current (€)": total_gold,
+                            "Target (€)": target_global_gold_eur, 
+                            "Progress": calc_prog(total_gold, target_global_gold_eur)
+                        },
+                        {
+                            "Asset": "Bonds (IBTE.UK)", 
+                            "Current (€)": total_bonds,
+                            "Target (€)": target_global_bonds_eur, 
+                            "Progress": calc_prog(total_bonds, target_global_bonds_eur)
+                        }
+                    ]
+                    
+                    st.markdown("##### 🌍 Global Overview")
+                    st.dataframe(pd.DataFrame(global_vault_data), use_container_width=True, hide_index=True, column_config={
+                        "Current (€)": st.column_config.NumberColumn(format="€%.2f"),
+                        "Target (€)": st.column_config.NumberColumn(format="€%.2f"),
+                        "Progress": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100)
+                    })
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"##### 🟢 {acc_port_name}")
+                        st.dataframe(pd.DataFrame(acc_vault_data), use_container_width=True, hide_index=True, column_config=shared_column_config)
+                    with col2:
+                        st.markdown(f"##### 🔵 {div_port_name}")
+                        st.dataframe(pd.DataFrame(div_vault_data), use_container_width=True, hide_index=True, column_config=shared_column_config)
+                    
+                    st.markdown("#### 🔄 Market Fluctuations Sync")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        new_gold_total = st.number_input("Market Value: Physical Gold", value=total_gold, min_value=0.0, step=0.01)
+                    with col2:
+                        new_bonds_total = st.number_input("Market Value: Bonds", value=total_bonds, min_value=0.0, step=0.01)
+
+                    if st.button("💾 Sync New Prices with Vault", width="stretch"):
+                        data = master_df.copy()
+                        updates_made = 0
+                        st.session_state.omni_messages = []
+                        
+                        # Process Gold Update
+                        if abs(new_gold_total - total_gold) > 0.01:
+                            if total_gold > 0:
+                                acc_gold_ratio = acc_gold / total_gold
+                                div_gold_ratio = div_gold / total_gold
+                            else:
+                                # Use core portfolio value (excl. vault tickers) — same as "Total Value" KPI
+                                vault_tickers_set = {"EGNL.UK", "IBTE.UK"}
+                                acc_val = float(acc_df[~acc_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not acc_df.empty else 0.0
+                                div_val = float(div_df[~div_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not div_df.empty else 0.0
+                                total_base = acc_val + div_val
+                                if total_base > 0:
+                                    acc_gold_ratio = acc_val / total_base
+                                    div_gold_ratio = div_val / total_base
+                                else:
+                                    acc_gold_ratio = 0.5
+                                    div_gold_ratio = 0.5
+                                
+                            mask_acc_gold = user_mask & (data['portfolio_type'] == "Accumulation") & (data['stock_name'] == "EGNL.UK")
+                            mask_div_gold = user_mask & (data['portfolio_type'] == "Dividends") & (data['stock_name'] == "EGNL.UK")
+                            
+                            data.loc[mask_acc_gold, 'current_value'] = new_gold_total * acc_gold_ratio
+                            data.loc[mask_div_gold, 'current_value'] = new_gold_total * div_gold_ratio
+                            updates_made += 1
+                                
+                        # Process Bonds Update
+                        if abs(new_bonds_total - total_bonds) > 0.01:
+                            if total_bonds > 0:
+                                acc_bonds_ratio = acc_bonds / total_bonds
+                                div_bonds_ratio = div_bonds / total_bonds
+                            else:
+                                vault_tickers_set = {"EGNL.UK", "IBTE.UK"}
+                                acc_val = float(acc_df[~acc_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not acc_df.empty else 0.0
+                                div_val = float(div_df[~div_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not div_df.empty else 0.0
+                                total_base = acc_val + div_val
+                                if total_base > 0:
+                                    acc_bonds_ratio = acc_val / total_base
+                                    div_bonds_ratio = div_val / total_base
+                                else:
+                                    acc_bonds_ratio = 0.5
+                                    div_bonds_ratio = 0.5
+                                
+                            mask_acc_bonds = user_mask & (data['portfolio_type'] == "Accumulation") & (data['stock_name'] == "IBTE.UK")
+                            mask_div_bonds = user_mask & (data['portfolio_type'] == "Dividends") & (data['stock_name'] == "IBTE.UK")
+                            
+                            data.loc[mask_acc_bonds, 'current_value'] = new_bonds_total * acc_bonds_ratio
+                            data.loc[mask_div_bonds, 'current_value'] = new_bonds_total * div_bonds_ratio
+                            updates_made += 1
+                                
+                        if updates_made > 0:
+                            conn.update(worksheet="Portfolios", data=data)
+                            st.cache_data.clear()
+                            st.session_state.master_data = data
+                            st.session_state.omni_messages.append(('success', f"✅ Balances successfully updated ({updates_made} assets)! Changes are synchronized across all sub-accounts."))
+                            st.rerun()
+                        else:
+                            if not st.session_state.omni_messages:
+                                st.session_state.omni_messages.append(('warning', "No updates saved. Values remain the same."))
+                            st.rerun()
+
+                    st.divider()
+                    st.markdown("#### 🧮 Total Vault Allocation")
+
+                    
+                    vault_allocs = st.session_state.get('vault_alloc_by_portfolio', {})
+                    
+                    if vault_allocs:
+                        total_gold_alloc = sum(v.get("EGNL.UK", 0.0) for v in vault_allocs.values())
+                        total_bonds_alloc = sum(v.get("IBTE.UK", 0.0) for v in vault_allocs.values())
+                        
+                        # Breakdown table
+                        breakdown_rows = []
+                        for pname, v in vault_allocs.items():
+                            gold_val = v.get("EGNL.UK", 0.0)
+                            bonds_val = v.get("IBTE.UK", 0.0)
+                            if gold_val > 0 or bonds_val > 0:
+                                breakdown_rows.append({"Portfolio": pname, "→ Gold (€)": gold_val, "→ Bonds (€)": bonds_val})
+                        
+                        if breakdown_rows:
+                            st.dataframe(
+                                pd.DataFrame(breakdown_rows),
+                                use_container_width=True, hide_index=True,
+                                column_config={
+                                    "→ Gold (€)": st.column_config.NumberColumn(format="€%.2f"),
+                                    "→ Bonds (€)": st.column_config.NumberColumn(format="€%.2f"),
+                                }
+                            )
+                        
+                        sum_col1, sum_col2 = st.columns(2)
+                        with sum_col1:
+                            render_kpi_card("🥇 Ouro (EGNL.UK)", f"€{total_gold_alloc:,.2f}")
+                        with sum_col2:
+                            render_kpi_card("📄 Obrigações (IBTE.UK)", f"€{total_bonds_alloc:,.2f}")
+                        
+                        st.markdown("")
+                        if st.button("💾 Registar Investimento no Cofre", use_container_width=True, type="primary"):
+                            with st.spinner("A gravar investimentos no Cofre..."):
+                                try:
+                                    master_data = st.session_state.master_data.copy()
+                                    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    log_rows = []
+                                    
+                                    for pname, v in vault_allocs.items():
+                                        p_type_v = v.get("type", "")
+                                        for ticker, invested_amount in [("EGNL.UK", v.get("EGNL.UK", 0.0)), ("IBTE.UK", v.get("IBTE.UK", 0.0))]:
+                                            if invested_amount <= 0:
+                                                continue
+                                            
+                                            mask = (master_data['username'] == username) & \
+                                                   (master_data['portfolio_type'] == p_type_v) & \
+                                                   (master_data['portfolio_name'] == pname) & \
+                                                   (master_data['stock_name'] == ticker)
+                                            
+                                            if mask.any():
+                                                old_val = float(master_data.loc[mask, 'current_value'].iloc[0])
+                                                new_val = old_val + invested_amount
+                                                master_data.loc[mask, 'current_value'] = new_val
+                                                
+                                                log_rows.append({
+                                                    'timestamp': now_ts, 'username': username,
+                                                    'portfolio_name': pname, 'Stock': ticker,
+                                                    'Current Value': old_val, 'Current %': 0,
+                                                    'Target %': 0, 'Target Value': 0,
+                                                    'Investment': invested_amount,
+                                                    'New Value': new_val, 'New %': 0
+                                                })
+                                    
+                                    # Write updated portfolio values
+                                    conn.update(worksheet="Portfolios", data=master_data)
+                                    st.session_state.master_data = master_data
+                                    
+                                    # Append to InvestmentLog
+                                    if log_rows:
+                                        log_df = pd.DataFrame(log_rows)
+                                        try: existing_history = conn.read(worksheet="InvestmentLog", ttl=0)
+                                        except: existing_history = pd.DataFrame()
+                                        new_history = pd.concat([existing_history, log_df], ignore_index=True) if existing_history is not None and not existing_history.empty else log_df
+                                        conn.update(worksheet="InvestmentLog", data=new_history)
+                                    
+                                    # Clear pending vault allocs
+                                    st.session_state.vault_alloc_by_portfolio = {}
+                                    st.session_state.omni_messages = [('success', f"✅ Cofre atualizado! {len(log_rows)} entrada(s) registadas no histórico.")]
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao gravar: {e}")
+                    else:
+                        st.info("No allocations have been calculated for any portfolio yet. Go to each portfolio and calculate the monthly allocation first.")
+
+
         if "📈 Portfolio Details" in tab_map:
             with tab_map["📈 Portfolio Details"]:
                 st.session_state.footer_msg = "<b>Data Insight:</b> Visualize your diversification and asset health."
+                uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
+                if uninvested_cash > 0:
+                    st.info(f"💡 You have **€{uninvested_cash:,.2f}** of uninvested cash. You can manage it in the 'Uninvested Cash' tab.", icon="🪙")
+                    
                 with st.container(border=True):
                     st.subheader("📈 Detailed Portfolio Information")
                     
@@ -2116,59 +2698,63 @@ elif authentication_status:
                     plot_data = pd.DataFrame([s for s in st.session_state.stocks if s['name'] != "__PLACEHOLDER__"])
                     
                     if not plot_data.empty:
-                        dist_col1, dist_col2, dist_col3 = st.columns(3)
-                        
                         chart_theme = dict(
                             paper_bgcolor='rgba(0,0,0,0)',
                             plot_bgcolor='rgba(0,0,0,0)',
-                            font=dict(color='white', size=14),
-                            height=350,
-                            margin=dict(t=50, b=50, l=10, r=10),
-                            legend=dict(
-                                orientation="h",
-                                yanchor="bottom",
-                                y=-0.3,
-                                xanchor="center",
-                                x=0.5,
-                                font=dict(size=14)
-                            )
+                            font=dict(color='white', size=13),
+                            height=400,
+                            margin=dict(t=40, b=40, l=80, r=80),
+                            showlegend=False
                         )
                         
-                        with dist_col1:
+                        # Use Tabs to provide massive horizontal workspace for Plotly leader lines
+                        dist_tab1, dist_tab2, dist_tab3, dist_tab4 = st.tabs(["📊 By Stock", "🏭 By Sector", "🏢 By Industry", "🌍 By Country"])
+                        
+                        with dist_tab1:
+                            # Current % (Asset Distribution)
+                            asset_data = plot_data.groupby('name')['current_value'].sum().reset_index()
+                            asset_data = asset_data[asset_data['current_value'] > 0]
+                            if not asset_data.empty:
+                                asset_data = asset_data.sort_values(by='current_value', ascending=False)
+                                fig_asset = px.pie(asset_data, values='current_value', names='name', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+                                fig_asset.update_layout(chart_theme)
+                                fig_asset.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
+                                st.plotly_chart(fig_asset, use_container_width=True)
+                            else:
+                                st.info("No asset data available.")
+
+                        with dist_tab2:
                             # Sector Distribution
                             sector_data = plot_data.groupby('sector')['current_value'].sum().reset_index()
                             sector_data = sector_data[sector_data['sector'] != '']
                             if not sector_data.empty:
-                                fig_sector = px.pie(sector_data, values='current_value', names='sector', hole=0.4)
-                                fig_sector.update_layout(chart_theme, title=dict(text="By Sector", x=0.5, font=dict(size=20)))
-                                fig_sector.update_traces(textposition='inside', textinfo='percent+label', insidetextorientation='horizontal')
-                                fig_sector.update_layout(uniformtext_minsize=12, uniformtext_mode='hide')
+                                fig_sector = px.pie(sector_data, values='current_value', names='sector', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+                                fig_sector.update_layout(chart_theme)
+                                fig_sector.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_sector, use_container_width=True)
                             else:
                                 st.info("No sector data available.")
                                 
-                        with dist_col2:
+                        with dist_tab3:
                             # Industry Distribution
                             ind_data = plot_data.groupby('industry')['current_value'].sum().reset_index()
                             ind_data = ind_data[ind_data['industry'] != '']
                             if not ind_data.empty:
-                                fig_ind = px.pie(ind_data, values='current_value', names='industry', hole=0.4)
-                                fig_ind.update_layout(chart_theme, title=dict(text="By Industry", x=0.5, font=dict(size=20)))
-                                fig_ind.update_traces(textposition='inside', textinfo='percent+label', insidetextorientation='horizontal')
-                                fig_ind.update_layout(uniformtext_minsize=12, uniformtext_mode='hide')
+                                fig_ind = px.pie(ind_data, values='current_value', names='industry', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+                                fig_ind.update_layout(chart_theme)
+                                fig_ind.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_ind, use_container_width=True)
                             else:
                                 st.info("No industry data available.")
                                 
-                        with dist_col3:
+                        with dist_tab4:
                             # Country Distribution
                             country_data = plot_data.groupby('country')['current_value'].sum().reset_index()
                             country_data = country_data[country_data['country'] != '']
                             if not country_data.empty:
-                                fig_country = px.pie(country_data, values='current_value', names='country', hole=0.4)
-                                fig_country.update_layout(chart_theme, title=dict(text="By Country", x=0.5, font=dict(size=20)))
-                                fig_country.update_traces(textposition='inside', textinfo='percent+label', insidetextorientation='horizontal')
-                                fig_country.update_layout(uniformtext_minsize=12, uniformtext_mode='hide')
+                                fig_country = px.pie(country_data, values='current_value', names='country', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+                                fig_country.update_layout(chart_theme)
+                                fig_country.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_country, use_container_width=True)
                             else:
                                 st.info("No country data available.")
@@ -2337,7 +2923,8 @@ elif authentication_status:
                                 monthly_stats['amount'] = monthly_stats['amount'].round(2)
                                 
                                 st.markdown("**Dividends Received (Yearly Comparison)**")
-                                fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount')
+                                fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount', color_discrete_sequence=CHART_PALETTE)
+                                fig_div.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=10, r=10))
                                 fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=16)
                                 fig_div.update_layout(
                                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -2416,14 +3003,4 @@ elif authentication_status:
                 st.toast("Check the sidebar to your left!", icon="👈")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # Footer
-    footer_text = st.session_state.get('footer_msg', "Maintain your risk profile with disciplined allocation.")
-    st.markdown(
-        f"""
-        <div style='text-align: center; color: #9CA3AF; padding: 20px; font-size: 0.8rem;'>
-        💡 {footer_text}<br>
-        <small>Educational purposes only. Always consult a financial advisor.</small>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+
