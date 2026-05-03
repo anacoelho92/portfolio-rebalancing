@@ -1034,21 +1034,28 @@ elif authentication_status:
                                 st.rerun()
 
 
-                    # Calculate Current Month's Dividends (for Dividends Portfolios)
-                    current_month_divs = 0.0
+                    # Calculate Previous Month's Dividends (for Dividends Portfolios)
+                    prev_month_divs = 0.0
+                    now = datetime.now()
+                    if now.month == 1:
+                        prev_month, prev_year = 12, now.year - 1
+                    else:
+                        prev_month, prev_year = now.month - 1, now.year
+                    
+                    prev_month_name = date(prev_year, prev_month, 1).strftime('%B')
+
                     if p_type == "Dividends":
                         div_df = st.session_state.dividends
                         if not div_df.empty:
                             div_df['date'] = pd.to_datetime(div_df['date'], errors='coerce')
                             div_df['amount'] = pd.to_numeric(div_df['amount'], errors='coerce').fillna(0.0)
                             
-                            now = datetime.now()
                             mask = (div_df['username'] == username) & \
                                    (div_df['portfolio_name'] == selected_portfolio) & \
-                                   (div_df['date'].dt.month == now.month) & \
-                                   (div_df['date'].dt.year == now.year)
+                                   (div_df['date'].dt.month == prev_month) & \
+                                   (div_df['date'].dt.year == prev_year)
                             
-                            current_month_divs = div_df[mask]['amount'].sum()
+                            prev_month_divs = div_df[mask]['amount'].sum()
 
                     monthly_investment_key = f"{selected_portfolio}_monthly_invest"
                     
@@ -1067,10 +1074,10 @@ elif authentication_status:
                     
                     # Update global monthly_investment for calculations
                     if p_type == "Dividends":
-                        monthly_investment = base_investment + current_month_divs
+                        monthly_investment = base_investment + prev_month_divs
                         
                         # Show Breakdown in Sidebar
-                        st.markdown(f"**📅 Dividends ({datetime.now().strftime('%B')}):** €{current_month_divs:,.2f}")
+                        st.markdown(f"**📅 Dividends ({prev_month_name}):** €{prev_month_divs:,.2f}")
                         st.markdown(f"**💰 Total Monthly Investment:** :green[€{monthly_investment:,.2f}]")
                     else:
                         monthly_investment = base_investment
@@ -1337,6 +1344,13 @@ elif authentication_status:
                 s['target_allocation'] = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
                 s['tolerance'] = 0.0
 
+        # Always push vault tickers to the bottom for consistent ordering across all views
+        vault_tickers = ["EGNL.UK", "IBTE.UK"]
+        core_stocks = [s for s in live_stocks if s['name'] not in vault_tickers]
+        vault_stocks = [s for s in live_stocks if s['name'] in vault_tickers]
+        core_stocks.sort(key=lambda x: x.get('target_allocation', 0.0), reverse=True)
+        live_stocks = core_stocks + vault_stocks
+
         # --- Top Row: KPI Cards ---
         total_current = sum(s['current_value'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
         total_target = sum(s['target_allocation'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
@@ -1536,9 +1550,23 @@ elif authentication_status:
                                 target_weight_bonds = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
                                 current_stocks_df.loc["IBTE.UK", "target_allocation"] = target_weight_bonds
                                 current_stocks_df.loc["IBTE.UK", "tolerance"] = 0.0
+
+                            # Always push vault tickers to the bottom
+                            vault_tickers = ["EGNL.UK", "IBTE.UK"]
+                            mask_vault = current_stocks_df.index.isin(vault_tickers)
+                            core_df = current_stocks_df[~mask_vault].sort_values(by="target_allocation", ascending=False)
+                            vault_df = current_stocks_df[mask_vault]
+                            current_stocks_df = pd.concat([core_df, vault_df])
                         else:
                             current_stocks_df = pd.DataFrame(columns=["current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
                             current_stocks_df.index.name = "name"
+                        
+                        # Apply row-level styling for Vault Assets
+                        def style_rows_mgmt(row):
+                            is_vault = row.name in ["EGNL.UK", "IBTE.UK"]
+                            return ['background-color: #1c2537;' if is_vault else '' for _ in row.index]
+                        
+                        styled_mgmt_df = current_stocks_df.style.apply(style_rows_mgmt, axis=1)
                         
                         # Configuration for Data Editor
                         column_config = {
@@ -1556,7 +1584,7 @@ elif authentication_status:
                         }
                         
                         edited_df = st.data_editor(
-                            current_stocks_df,
+                            styled_mgmt_df,
                             column_config=column_config,
                             num_rows="dynamic",
                             use_container_width=True,
@@ -2017,7 +2045,7 @@ elif authentication_status:
                         df = st.session_state.last_calculation['df']
                         
                         # Create a display-only version by dropping columns requested by user
-                        display_df = df.drop(columns=["Target %", "Target Value"])
+                        display_df = df.drop(columns=["TER %", "Target Value"])
                         
                         # Always push vault tickers to the bottom
                         vault_tickers = ["EGNL.UK", "IBTE.UK"]
