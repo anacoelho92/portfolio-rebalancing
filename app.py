@@ -1529,11 +1529,9 @@ elif authentication_status:
                         # Prepare data for Editor
                         current_stocks_df = pd.DataFrame(st.session_state.stocks)
                         if not current_stocks_df.empty:
-                            # Freeze Ticker by setting as Index
-                            current_stocks_df.set_index("name", inplace=True)
-                            
                             # Slice to only include core rebalancing columns for this tab
-                            core_cols = ["current_value", "target_allocation", "tolerance", "expense_ratio"]
+                            # Keep 'name' as a column to style the ticker too
+                            core_cols = ["name", "current_value", "target_allocation", "tolerance", "expense_ratio"]
                             if p_type == "Dividends":
                                 core_cols.append("current_price")
                             
@@ -1542,35 +1540,38 @@ elif authentication_status:
 
                             # Auto-force Lifecycle Targets for Gold & Bonds inside any Portfolio
                             lc_strat = get_lifecycle_strategy("1992-01-01")
-                            if "EGNL.UK" in current_stocks_df.index:
-                                target_weight_gold = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
-                                current_stocks_df.loc["EGNL.UK", "target_allocation"] = target_weight_gold
-                                current_stocks_df.loc["EGNL.UK", "tolerance"] = 0.0 # Force tolerance to 0 for precision
-                            if "IBTE.UK" in current_stocks_df.index:
-                                target_weight_bonds = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
-                                current_stocks_df.loc["IBTE.UK", "target_allocation"] = target_weight_bonds
-                                current_stocks_df.loc["IBTE.UK", "tolerance"] = 0.0
+                            vault_tickers = ["EGNL.UK", "IBTE.UK"]
+                            
+                            for ticker in vault_tickers:
+                                if ticker in current_stocks_df['name'].values:
+                                    target_key = 'gold' if ticker == "EGNL.UK" else 'bonds'
+                                    target_weight = lc_strat['acc'][target_key] if p_type == "Accumulation" else lc_strat['div'][target_key]
+                                    
+                                    mask = current_stocks_df['name'] == ticker
+                                    current_stocks_df.loc[mask, "target_allocation"] = target_weight
+                                    current_stocks_df.loc[mask, "tolerance"] = 0.0 # Force tolerance to 0 for precision
 
                             # Always push vault tickers to the bottom
-                            vault_tickers = ["EGNL.UK", "IBTE.UK"]
-                            mask_vault = current_stocks_df.index.isin(vault_tickers)
+                            mask_vault = current_stocks_df['name'].isin(vault_tickers)
                             core_df = current_stocks_df[~mask_vault].sort_values(by="target_allocation", ascending=False)
                             vault_df = current_stocks_df[mask_vault]
                             current_stocks_df = pd.concat([core_df, vault_df])
                         else:
-                            current_stocks_df = pd.DataFrame(columns=["current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
-                            current_stocks_df.index.name = "name"
+                            current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
                         
-                        # Apply row-level styling for Vault Assets
+                        # Simple row-level styling
                         def style_rows_mgmt(row):
-                            is_vault = row.name in ["EGNL.UK", "IBTE.UK"]
-                            return ['background-color: #1c2537;' if is_vault else '' for _ in row.index]
+                            ticker = str(row.get("name", ""))
+                            is_vault = any(v in ticker for v in ["EGNL.UK", "IBTE.UK"])
+                            if is_vault:
+                                return ['background-color: #1c2537;' for _ in row.index]
+                            return ['' for _ in row.index]
                         
                         styled_mgmt_df = current_stocks_df.style.apply(style_rows_mgmt, axis=1)
                         
                         # Configuration for Data Editor
                         column_config = {
-                            "name": st.column_config.TextColumn("Ticker", required=True),
+                            "name": st.column_config.TextColumn("Ticker", required=True, disabled=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn(
                                 "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", 
@@ -1588,6 +1589,7 @@ elif authentication_status:
                             column_config=column_config,
                             num_rows="dynamic",
                             use_container_width=True,
+                            hide_index=True,
                             key=f"portfolio_editor_{st.session_state.editor_key}",
                             on_change=clear_recommendations
                         )
@@ -1596,9 +1598,8 @@ elif authentication_status:
                         # This ensures charts and calculations use the latest typed values even before saving
                         if not edited_df.equals(current_stocks_df):
                             # DETECT DELETIONS
-                            # Must reset index to get 'name' back into the columns for to_dict('records')
-                            updated_stocks = edited_df.reset_index().to_dict('records')
-                            old_stocks = current_stocks_df.reset_index().to_dict('records')
+                            updated_stocks = edited_df.to_dict('records')
+                            old_stocks = current_stocks_df.to_dict('records')
         
                             if len(updated_stocks) < len(old_stocks):
                                 # Row(s) were deleted
@@ -1703,7 +1704,7 @@ elif authentication_status:
                             
                             # Then create new rows from edited_df
                             new_rows = []
-                            for _, row in edited_df.reset_index().iterrows():
+                            for _, row in edited_df.iterrows():
                                 if row['name'] and row['name'] != "__PLACEHOLDER__":
                                      new_rows.append({
                                         "username": username,
@@ -2052,12 +2053,10 @@ elif authentication_status:
                         core_df = display_df[~display_df["Stock"].isin(vault_tickers)]
                         vault_df = display_df[display_df["Stock"].isin(vault_tickers)]
                         display_df = pd.concat([core_df, vault_df], ignore_index=True)
-                        
-                        # Build row-level styling (keep Stock as column, not index, to style ticker too)
                         def style_rows(row):
-                            is_vault = row.get("Stock", "") in vault_tickers
+                            ticker = str(row.get("Stock", ""))
+                            is_vault = any(v in ticker for v in vault_tickers)
                             if is_vault:
-                                # Slightly lighter than Streamlit dark blue (#0e1117) page bg
                                 base = 'background-color: #1c2537;'
                                 invest_style = 'background-color: #1c2537; font-weight: 700;'
                             else:
