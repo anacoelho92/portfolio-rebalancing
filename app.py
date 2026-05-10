@@ -8,6 +8,7 @@ from yaml.loader import SafeLoader
 import os
 from dotenv import load_dotenv
 from datetime import datetime, date
+from typing import Dict, Any
 
 # --- PREMIUM CHART COLOR PALETTE ---
 CHART_PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F43F5E', '#84CC16', '#6366F1', '#0EA5E9']
@@ -73,6 +74,376 @@ def get_lifecycle_strategy(birth_date_str):
             'acc': {'stocks': 70.0, 'bonds': 20.0, 'gold': 10.0},
             'div': {'stocks': 60.0, 'bonds': 30.0, 'gold': 10.0}
         }
+
+
+# =========================
+# Unified Portfolio Helpers & Allocation Logic
+# =========================
+
+def clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def round_weights(weights: Dict[str, float], decimals: int = 2) -> Dict[str, float]:
+    return {asset: round(weight, decimals) for asset, weight in weights.items()}
+
+
+def get_lifecycle_targets(age: int) -> Dict[str, float]:
+    """
+    Defines the strategic allocation by age.
+
+    growth = SPYL / IXUA / VFEA block
+    EGLN = gold
+    PRAB = bonds / cash-like EUR government bonds 0-1y
+    """
+
+    if age < 40:
+        return {
+            "growth": 77.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 3.0,
+            "PRAB.DE": 2.7,
+        }
+
+    elif age < 45:
+        return {
+            "growth": 74.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 4.0,
+            "PRAB.DE": 4.7,
+        }
+
+    elif age < 50:
+        return {
+            "growth": 70.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 5.0,
+            "PRAB.DE": 7.7,
+        }
+
+    elif age < 55:
+        return {
+            "growth": 66.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 6.0,
+            "PRAB.DE": 10.7,
+        }
+
+    elif age < 60:
+        return {
+            "growth": 60.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 8.0,
+            "PRAB.DE": 14.7,
+        }
+
+    elif age < 65:
+        return {
+            "growth": 54.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 10.0,
+            "PRAB.DE": 18.7,
+        }
+
+    else:
+        return {
+            "growth": 47.0,
+            "WTEQ.DE": 10.8,
+            "VDIV.DE": 4.5,
+            "JMT.PT": 1.0,
+            "EDP.PT": 1.0,
+            "EGLN.UK": 10.0,
+            "PRAB.DE": 25.7,
+        }
+
+
+def calculate_growth_split(buffett_index: float) -> Dict[str, float]:
+    """
+    Calculates the allocation inside the growth block.
+
+    Buffett <= 100  -> SPYL 70%
+    Buffett ~165    -> SPYL 60%
+    Buffett >= 230  -> SPYL 50%
+
+    VFEA moves in stable steps:
+    - SPYL >= 65 -> VFEA 10%
+    - SPYL >= 55 -> VFEA 12.5%
+    - SPYL < 55 -> VFEA 15%
+    """
+
+    SPYL_MIN = 50.0
+    SPYL_MAX = 70.0
+
+    BUFFETT_LOW = 100.0
+    BUFFETT_HIGH = 230.0
+
+    target_spyl = SPYL_MAX - (
+        (buffett_index - BUFFETT_LOW) / (BUFFETT_HIGH - BUFFETT_LOW)
+    ) * (SPYL_MAX - SPYL_MIN)
+
+    target_spyl = round(clamp(target_spyl, SPYL_MIN, SPYL_MAX))
+
+    if target_spyl >= 65.0:
+        target_vfea = 10.0
+    elif target_spyl >= 55.0:
+        target_vfea = 12.5
+    else:
+        target_vfea = 15.0
+
+    target_ixua = 100.0 - target_spyl - target_vfea
+
+    return {
+        "SPYL.DE": target_spyl,
+        "IXUA.DE": target_ixua,
+        "VFEA.DE": target_vfea,
+    }
+
+
+def calculate_portfolio_targets(age: int, buffett_index: float) -> Dict[str, Any]:
+    """
+    Calculates final portfolio target weights.
+
+    Returns:
+    - lifecycle allocation
+    - growth split
+    - final portfolio target weights
+    """
+
+    lifecycle = get_lifecycle_targets(age)
+    growth_weight = lifecycle["growth"]
+
+    growth_split = calculate_growth_split(buffett_index)
+
+    spyl_target = round(growth_weight * growth_split["SPYL.DE"] / 100.0, 2)
+    vfea_target = round(growth_weight * growth_split["VFEA.DE"] / 100.0, 2)
+    ixua_target = round(growth_weight - spyl_target - vfea_target, 2)
+
+    targets = {
+        "SPYL.DE": spyl_target,
+        "IXUA.DE": ixua_target,
+        "VFEA.DE": vfea_target,
+        "WTEQ.DE": lifecycle["WTEQ.DE"],
+        "VDIV.DE": lifecycle["VDIV.DE"],
+        "JMT.PT": lifecycle["JMT.PT"],
+        "EDP.PT": lifecycle["EDP.PT"],
+        "EGLN.UK": lifecycle["EGLN.UK"],
+        "PRAB.DE": lifecycle["PRAB.DE"],
+    }
+
+    total = sum(targets.values())
+
+    if abs(total - 100.0) > 0.01:
+        raise ValueError(f"Portfolio targets do not sum to 100%. Total = {total:.2f}%")
+
+    return {
+        "age": age,
+        "buffett_index": buffett_index,
+        "lifecycle": lifecycle,
+        "growth_split": growth_split,
+        "targets": round_weights(targets, 2),
+        "total": round(total, 2),
+    }
+
+
+TOLERANCE_PP = {
+    "SPYL.DE": 3.0,
+    "IXUA.DE": 3.0,
+    "VFEA.DE": 1.5,
+    "WTEQ.DE": 2.0,
+    "VDIV.DE": 2.0,
+    "JMT.PT": 1.0,
+    "EDP.PT": 1.0,
+    "EGLN.UK": 1.0,
+    "PRAB.DE": 0.5,
+}
+
+
+def calculate_monthly_buys(
+    age: int,
+    buffett_index: float,
+    current_values: Dict[str, float],
+    monthly_contribution: float,
+    min_order_size: float = 5.0,
+) -> Dict[str, Any]:
+    """
+    Calculates how to allocate the monthly contribution.
+
+    Rules:
+    - Never sell.
+    - Only buy assets below their tolerance band.
+    - Ignore orders below min_order_size.
+    - Leftover cash is returned.
+    """
+
+    portfolio_data = calculate_portfolio_targets(age, buffett_index)
+    targets = portfolio_data["targets"]
+
+    all_assets = list(targets.keys())
+
+    portfolio_value = sum(current_values.get(asset, 0.0) for asset in all_assets)
+
+    if portfolio_value < 0:
+        raise ValueError("Portfolio value cannot be negative.")
+
+    if monthly_contribution <= 0:
+        raise ValueError("Monthly contribution must be positive.")
+
+    # If portfolio is empty, buy according to target weights
+    if portfolio_value == 0:
+        raw_buys = {
+            asset: monthly_contribution * targets[asset] / 100.0
+            for asset in all_assets
+        }
+
+        # Apply minimum order size and round down to integer euros
+        import math
+        rounded_buys = {}
+        total_rounded = 0.0
+        for asset, amount in raw_buys.items():
+            if amount >= min_order_size:
+                rounded_val = float(math.floor(amount))
+                rounded_buys[asset] = rounded_val
+                total_rounded += rounded_val
+            else:
+                rounded_buys[asset] = 0.0
+
+        # Redistribution of Cents ("The Dump")
+        leftover_cash = 0.0
+        if any(rounded_buys.values()):
+            dump_ticker = max(rounded_buys, key=rounded_buys.get)
+            remaining_budget = monthly_contribution - total_rounded
+            if remaining_budget > 0:
+                rounded_buys[dump_ticker] += remaining_budget
+            leftover_cash = 0.0
+        else:
+            leftover_cash = monthly_contribution
+
+        buys = rounded_buys
+
+        return {
+            "age": age,
+            "buffett_index": buffett_index,
+            "portfolio_value_before": 0.0,
+            "monthly_contribution": round(monthly_contribution, 2),
+            "portfolio_value_after": round(monthly_contribution, 2),
+            "portfolio_targets": targets,
+            "current_weights": {asset: 0.0 for asset in all_assets},
+            "raw_buys": round_weights(raw_buys, 2),
+            "buys": round_weights(buys, 2),
+            "leftover_cash": round(leftover_cash, 2),
+        }
+
+    # Current weights before contribution
+    current_weights = {
+        asset: current_values.get(asset, 0.0) / portfolio_value * 100.0
+        for asset in all_assets
+    }
+
+    # Portfolio value after new contribution
+    new_total_value = portfolio_value + monthly_contribution
+
+    # Target value after contribution
+    target_values_after_contribution = {
+        asset: new_total_value * targets[asset] / 100.0
+        for asset in all_assets
+    }
+
+    # Value gaps to target
+    value_gaps = {
+        asset: max(
+            0.0,
+            target_values_after_contribution[asset] - current_values.get(asset, 0.0)
+        )
+        for asset in all_assets
+    }
+
+    # Percentage gaps before contribution
+    percentage_gaps = {
+        asset: max(0.0, targets[asset] - current_weights[asset])
+        for asset in all_assets
+    }
+
+    # Only eligible if below tolerance band
+    eligible_gaps = {
+        asset: value_gaps[asset]
+        for asset in all_assets
+        if percentage_gaps[asset] >= TOLERANCE_PP[asset]
+    }
+
+    total_eligible_gap = sum(eligible_gaps.values())
+
+    if total_eligible_gap > 0:
+        raw_buys = {
+            asset: monthly_contribution * eligible_gaps.get(asset, 0.0) / total_eligible_gap
+            for asset in all_assets
+        }
+    else:
+        # If nothing is materially below target, invest according to target weights
+        raw_buys = {
+            asset: monthly_contribution * targets[asset] / 100.0
+            for asset in all_assets
+        }
+
+    # Apply minimum order size and round down to integer euros
+    import math
+    rounded_buys = {}
+    total_rounded = 0.0
+    for asset, amount in raw_buys.items():
+        if amount >= min_order_size:
+            rounded_val = float(math.floor(amount))
+            rounded_buys[asset] = rounded_val
+            total_rounded += rounded_val
+        else:
+            rounded_buys[asset] = 0.0
+
+    # Redistribution of Cents ("The Dump")
+    # All remaining contribution goes into the ticker with the highest investment
+    leftover_cash = 0.0
+    if any(rounded_buys.values()):
+        dump_ticker = max(rounded_buys, key=rounded_buys.get)
+        remaining_budget = monthly_contribution - total_rounded
+        if remaining_budget > 0:
+            rounded_buys[dump_ticker] += remaining_budget
+        leftover_cash = 0.0
+    else:
+        leftover_cash = monthly_contribution
+
+    buys = rounded_buys
+
+    return {
+        "age": age,
+        "buffett_index": buffett_index,
+        "portfolio_value_before": round(portfolio_value, 2),
+        "monthly_contribution": round(monthly_contribution, 2),
+        "portfolio_value_after": round(new_total_value, 2),
+        "portfolio_targets": targets,
+        "current_weights": round_weights(current_weights, 2),
+        "percentage_gaps": round_weights(percentage_gaps, 2),
+        "eligible_assets": list(eligible_gaps.keys()),
+        "raw_buys": round_weights(raw_buys, 2),
+        "buys": round_weights(buys, 2),
+        "leftover_cash": round(leftover_cash, 2),
+    }
+
+
 
 # Load environment variables
 load_dotenv(override=True)
@@ -743,7 +1114,7 @@ elif authentication_status:
             }}
             </style>
             <div style="padding-top: 10px; line-height: 1.2;">
-                <div style="color: #1f2937; font-size: 1.8rem; font-weight: 800;">💵 Total Value</div>
+                <div style="color: #1f2937; font-size: 1.8rem; font-weight: 800;">💶 Total Value</div>
                 <div class="green-text-force" style="color: #10B981 !important; font-size: 2.2rem !important; font-weight: 900 !important; padding-left: 2.3rem; margin-top: -5px;">€{global_total:,.2f}</div>
             </div>
             """,
@@ -784,11 +1155,30 @@ elif authentication_status:
         # 1. Portfolios Section
         with st.expander("📂 Portfolios", expanded=True):
             if portfolio_options:
+                def format_portfolio_name(p_name):
+                    if p_name == "🌍 Global Overview": return p_name
+                    name_lower = p_name.lower()
+                    if "grow" in name_lower or "accum" in name_lower:
+                        return f"🌱 {p_name}"
+                    if "dividend" in name_lower:
+                        return f"💸 {p_name}"
+
+                    if user_all_data.empty: return p_name
+                    p_rows = user_all_data[user_all_data['portfolio_name'] == p_name]
+                    if p_rows.empty: return p_name
+                    p_type = p_rows['portfolio_type'].iloc[0]
+                    
+                    if p_type == "Stocks": return f"📈 {p_name}"
+                    elif p_type == "Kids": return f"🧸 {p_name}"
+                    elif p_type == "Unified": return f"🏛️ {p_name}"
+                    return f"📁 {p_name}"
+
                 selected_portfolio = st.selectbox(
                     "Select View", 
                     portfolio_options, 
                     index=default_index, 
                     key="portfolio_selector",
+                    format_func=format_portfolio_name,
                     on_change=reset_portfolio_state
                 )
                 # If a new portfolio was just created and we just rendered the selectbox with it, we can clear the flag
@@ -801,7 +1191,7 @@ elif authentication_status:
             # Create New Portfolio
             with st.expander("➕ Create New Portfolio"):
                 new_portfolio_input = st.text_input("Name", placeholder="e.g., Accumulation", key="new_p_name")
-                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Dividends", "Kids", "Accumulation", "Gold & Bonds", "Other"], index=3, key="new_p_type")
+                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Kids", "Unified"], index=2, key="new_p_type")
                 if st.button("Create"):
                     if new_portfolio_input and new_portfolio_input not in existing_portfolios:
                         # Create a placeholder row to persist the portfolio name
@@ -833,9 +1223,9 @@ elif authentication_status:
             if selected_portfolio and selected_portfolio != "🌍 Global Overview":
                 with st.expander(f"⚙️ Portfolio Settings"):
                     # Get current type for default
-                    current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Other"
-                    type_options = ["Stocks", "Dividends", "Kids", "Accumulation", "Gold & Bonds", "Other"]
-                    type_index = type_options.index(current_type) if current_type in type_options else 3
+                    current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Unified"
+                    type_options = ["Stocks", "Kids", "Unified"]
+                    type_index = type_options.index(current_type) if current_type in type_options else 2
 
                     new_name_input = st.text_input("Rename Portfolio", value=selected_portfolio, placeholder="e.g., accumulation 2026")
                     new_type_input = st.selectbox("Portfolio Type", options=type_options, index=type_index)
@@ -892,7 +1282,7 @@ elif authentication_status:
     # --- Sync Data Logic (Source of Truth) ---
     # Load current stocks from Master data (Persistent state)
     # This list reflects the state AT THE START of the run.
-    p_type = "Other"
+    p_type = "Unified"
     if selected_portfolio:
         p_rows = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]
         if not p_rows.empty:
@@ -908,23 +1298,89 @@ elif authentication_status:
     # Initialize session state for stocks ONLY if portfolio changes or it's first run
     if st.session_state.get('last_selected_portfolio') != selected_portfolio:
         current_stocks = []
-        for _, row in user_portfolio_df.iterrows():
-            current_stocks.append({
-                "name": row['stock_name'],
-                "current_value": row['current_value'],
-                "target_allocation": row['target_allocation'],
-                "tolerance": row.get('tolerance', 0.0),
-                "expense_ratio": row.get('expense_ratio', 0.0),
-                "full_name": row.get('stock_full_name', ''),
-                "sector": row.get('sector', ''),
-                "industry": row.get('industry', ''),
-                "country": row.get('country', ''),
-                "currency": row.get('currency', ''),
-                "quantity": float(row.get('quantity', 0.0)),
-                "average_price": float(row.get('average_price', 0.0)),
-                "current_price": float(row.get('current_price', 0.0)),
-                "dividend_yield": float(row.get('dividend_yield', 0.0))
-            })
+        if p_type == "Unified":
+            # Map tickers and aggregate duplicate holdings (e.g. from historical merges)
+            ticker_map = {
+                "WTEQ.DE": "WTEQ.DE",
+                "VDIV.DE": "VDIV.DE",
+                "JMT.PT": "JMT.PT",
+                "EDP.PT": "EDP.PT",
+                "EGNL.UK": "EGLN.UK",
+                "EGLN.UK": "EGLN.UK",
+                "IBTE.UK": "PRAB.DE"
+            }
+            aggregated_holdings = {}
+            for _, row in user_portfolio_df.iterrows():
+                raw_name = str(row['stock_name'])
+                mapped_name = ticker_map.get(raw_name, raw_name)
+                
+                if mapped_name not in aggregated_holdings:
+                    aggregated_holdings[mapped_name] = {
+                        "name": mapped_name,
+                        "current_value": 0.0,
+                        "target_allocation": 0.0,
+                        "tolerance": TOLERANCE_PP.get(mapped_name, 2.0),
+                        "expense_ratio": float(row.get('expense_ratio', 0.0)),
+                        "full_name": row.get('stock_full_name', mapped_name),
+                        "sector": row.get('sector', ''),
+                        "industry": row.get('industry', ''),
+                        "country": row.get('country', ''),
+                        "currency": row.get('currency', 'EUR'),
+                        "quantity": 0.0,
+                        "average_price": float(row.get('average_price', 0.0)),
+                        "current_price": float(row.get('current_price', 0.0)),
+                        "dividend_yield": float(row.get('dividend_yield', 0.0))
+                    }
+                
+                rec = aggregated_holdings[mapped_name]
+                rec["current_value"] += float(row['current_value'])
+                rec["quantity"] += float(row.get('quantity', 0.0))
+                if rec["expense_ratio"] == 0.0 and float(row.get('expense_ratio', 0.0)) > 0.0:
+                    rec["expense_ratio"] = float(row.get('expense_ratio', 0.0))
+                if rec["current_price"] == 0.0 and float(row.get('current_price', 0.0)) > 0.0:
+                    rec["current_price"] = float(row.get('current_price', 0.0))
+
+            current_stocks = list(aggregated_holdings.values())
+            
+            # Ensure all 9 target assets are present in the list
+            required_tickers = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "WTEQ.DE", "VDIV.DE", "JMT.PT", "EDP.PT", "EGLN.UK", "PRAB.DE"]
+            existing_tickers = [s["name"] for s in current_stocks]
+            for ticker in required_tickers:
+                if ticker not in existing_tickers:
+                    current_stocks.append({
+                        "name": ticker,
+                        "current_value": 0.0,
+                        "target_allocation": 0.0,
+                        "tolerance": TOLERANCE_PP.get(ticker, 2.0),
+                        "expense_ratio": 0.0,
+                        "full_name": ticker,
+                        "sector": "",
+                        "industry": "",
+                        "country": "",
+                        "currency": "EUR",
+                        "quantity": 0.0,
+                        "average_price": 0.0,
+                        "current_price": 0.0,
+                        "dividend_yield": 0.0
+                    })
+        else:
+            for _, row in user_portfolio_df.iterrows():
+                current_stocks.append({
+                    "name": row['stock_name'],
+                    "current_value": row['current_value'],
+                    "target_allocation": row['target_allocation'],
+                    "tolerance": row.get('tolerance', 0.0),
+                    "expense_ratio": row.get('expense_ratio', 0.0),
+                    "full_name": row.get('stock_full_name', ''),
+                    "sector": row.get('sector', ''),
+                    "industry": row.get('industry', ''),
+                    "country": row.get('country', ''),
+                    "currency": row.get('currency', ''),
+                    "quantity": float(row.get('quantity', 0.0)),
+                    "average_price": float(row.get('average_price', 0.0)),
+                    "current_price": float(row.get('current_price', 0.0)),
+                    "dividend_yield": float(row.get('dividend_yield', 0.0))
+                })
         st.session_state.stocks = current_stocks
         st.session_state.last_selected_portfolio = selected_portfolio
 
@@ -952,36 +1408,79 @@ elif authentication_status:
                 st.session_state[f"{key_prefix}_target"] = float(stock['target_allocation'])
                 st.session_state[f"{key_prefix}_tolerance"] = float(stock.get('tolerance', 0.0))
 
-        # --- Dynamic Overrides (Run every rerun to catch Birth Date changes) ---
-        if selected_portfolio and 'stocks' in st.session_state:
-            # 1. Kids Targets
-            if p_type == "Kids" and st.session_state.get(f"{selected_portfolio}_birth_date"):
-                kids_targets = calculate_kids_targets(st.session_state[f"{selected_portfolio}_birth_date"])
-                if kids_targets:
-                    for ticker, target in kids_targets.items():
-                        for stock in st.session_state.stocks:
-                            if stock['name'] == ticker:
-                                stock['target_allocation'] = target
-                                break
+    # --- Dynamic Overrides (Run every rerun to catch Birth Date changes) ---
+    if selected_portfolio and 'stocks' in st.session_state:
+        # 1. Kids Targets
+        if p_type == "Kids" and st.session_state.get(f"{selected_portfolio}_birth_date"):
+            kids_targets = calculate_kids_targets(st.session_state[f"{selected_portfolio}_birth_date"])
+            if kids_targets:
+                for ticker, target in kids_targets.items():
+                    for stock in st.session_state.stocks:
+                        if stock['name'] == ticker:
+                            stock['target_allocation'] = target
+                            break
 
-            # 2. Gold & Bonds Targets (Lifecycle)
-            if p_type == "Gold & Bonds":
-                lc_strat = get_lifecycle_strategy("1992-01-01")
-                for stock in st.session_state.stocks:
-                    if stock['name'].upper() == "EGNL.UK":
-                        stock['target_allocation'] = lc_strat['acc']['gold']
-                        stock['tolerance'] = lc_strat['div']['gold']
-                    elif stock['name'].upper() == "IBTE.UK":
-                        stock['target_allocation'] = lc_strat['acc']['bonds']
-                        stock['tolerance'] = lc_strat['div']['bonds']
+        # 3. Unified Targets and Tolerances Overrides
+        if p_type == "Unified":
+            birth_date_str = st.session_state.get(f"{selected_portfolio}_investor_birth_date", "1992-01-01")
+            try:
+                birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                today = date.today()
+                age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+            except Exception:
+                age = 34
+            
+            buffett_index = float(st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0))
+            
+            try:
+                targets_data = calculate_portfolio_targets(age, buffett_index)
+                unified_targets = targets_data["targets"]
+            except Exception as e:
+                st.error(f"Error calculating Unified Targets: {e}")
+                unified_targets = {}
+            
+            for stock in st.session_state.stocks:
+                ticker = stock['name']
+                if ticker in unified_targets:
+                    stock['target_allocation'] = unified_targets[ticker]
+                    stock['tolerance'] = TOLERANCE_PP.get(ticker, 2.0)
+                else:
+                    stock['target_allocation'] = 0.0
+                    stock['tolerance'] = 2.0
 
     # Sidebar utilities (Configuration and Indicators)
     with st.sidebar:
         if selected_portfolio:
             # 2. Configuration Section
-            if p_type in ["Dividends", "Kids", "Accumulation", "Other"]:
+            if p_type in ["Kids", "Unified"]:
                 # Default expander behavior: auto-expand for 'Kids' to set birth date, others remain collapsed
                 with st.expander("⚙️ Configuration", expanded=(p_type == "Kids")):
+                    if p_type == "Unified":
+                        investor_birth_key = f"{selected_portfolio}_investor_birth_date"
+                        current_investor_birth = st.session_state.get(investor_birth_key, '1992-01-01')
+                        
+                        try:
+                            if isinstance(current_investor_birth, str) and current_investor_birth:
+                                default_date = datetime.strptime(current_investor_birth, "%Y-%m-%d").date()
+                            else:
+                                default_date = date(1992, 1, 1)
+                        except ValueError:
+                            default_date = date(1992, 1, 1)
+                            
+                        investor_birth_input = st.date_input(
+                            "Investor's Birth Date",
+                            value=default_date,
+                            min_value=date(1900, 1, 1),
+                            max_value=datetime.today().date(),
+                            key=f"{investor_birth_key}_input",
+                            on_change=clear_recommendations
+                        )
+                        
+                        if str(investor_birth_input) != current_investor_birth:
+                            st.session_state[investor_birth_key] = str(investor_birth_input)
+                            st.session_state.has_unsaved_changes = True
+                            st.rerun()
+
                     if p_type == "Kids":
                         birth_date_key = f"{selected_portfolio}_birth_date"
                         current_birth_date = st.session_state.get(birth_date_key, '')
@@ -1044,7 +1543,7 @@ elif authentication_status:
                     
                     prev_month_name = date(prev_year, prev_month, 1).strftime('%B')
 
-                    if p_type == "Dividends":
+                    if p_type == "Unified":
                         div_df = st.session_state.dividends
                         if not div_df.empty:
                             div_df['date'] = pd.to_datetime(div_df['date'], errors='coerce')
@@ -1059,21 +1558,17 @@ elif authentication_status:
 
                     monthly_investment_key = f"{selected_portfolio}_monthly_invest"
                     
-                    if p_type != "Gold & Bonds":
-                        base_investment = st.number_input(
-                            "Monthly Investment Amount (€)",
-                            min_value=0.0,
-                            value=st.session_state.get(monthly_investment_key, 1000.0),
-                            key=monthly_investment_key,
-                            step=100.0,
-                            help="Base amount you want to invest this month",
-                            on_change=clear_recommendations
-                        )
-                    else:
-                        base_investment = 0.0
+                    base_investment = st.number_input(
+                        "Monthly Investment Amount (€)",
+                        min_value=0.0,
+                        value=st.session_state.get(monthly_investment_key, 1000.0),
+                        key=monthly_investment_key,
+                        step=100.0,
+                        help="Base amount you want to invest this month",
+                        on_change=clear_recommendations
+                    )
                     
-                    # Update global monthly_investment for calculations
-                    if p_type == "Dividends":
+                    if p_type == "Unified":
                         monthly_investment = base_investment + prev_month_divs
                         
                         # Show Breakdown in Sidebar
@@ -1082,132 +1577,21 @@ elif authentication_status:
                     else:
                         monthly_investment = base_investment
                     
-                    # Market Indicators (Exclusively for 'Accumulation' type portfolios)
-                    is_accumulation = p_type == "Accumulation"
-                    
-                    if is_accumulation:
+                    if p_type == "Unified":
                         st.markdown("### Market Indicators")
-                        
-                        # Track state transitions for reverting to manual targets
-                        if 'prev_indicators_state' not in st.session_state:
-                            st.session_state.prev_indicators_state = False
-                            
-                        use_indicators_key = f"{selected_portfolio}_use_indicators"
-                        use_market_indicators = st.checkbox(
-                            "Use Market Indicators", 
-                            key=use_indicators_key,
-                            help="Enable rebalancing rules based on Buffett Indicator",
+                        buffett_index_key = f"{selected_portfolio}_buffett_index"
+                        buffett_index = st.number_input(
+                            "Buffett Indicator (%)", 
+                            key=buffett_index_key,
+                            value=st.session_state.get(buffett_index_key, 195.0),
+                            step=0.1, 
+                            help="Market Cap to GDP ratio",
                             on_change=clear_recommendations
                         )
-                        # Detect Transition: ON -> OFF
-                        if not use_market_indicators and st.session_state.prev_indicators_state:
-                            # Revert logic follows...
-                            if st.session_state.saved_manual_targets.get(selected_portfolio):
-                                manual_map = st.session_state.saved_manual_targets[selected_portfolio]
-                                
-                                # Filter for this portfolio's rows in global 'data'
-                                mask = (data['username'] == username) & (data['portfolio_name'] == selected_portfolio)
-                                
-                                # Update 'data' with manual targets before saving back to DB
-                                for stock_name, target in manual_map.items():
-                                    data.loc[mask & (data['stock_name'] == stock_name), 'target_allocation'] = target
-                                
-                                st.session_state.master_data = data
-                                # Deferred: conn.update(worksheet="Portfolios", data=data)
-                                st.session_state.has_unsaved_changes = True
-                                
-                                # Update session state and widget keys
-                                for i, stock in enumerate(st.session_state.stocks):
-                                    if stock['name'] in manual_map:
-                                        val = manual_map[stock['name']]
-                                        st.session_state.stocks[i]['target_allocation'] = val
-                                        st.session_state[f"{selected_portfolio}_{i}_target"] = val
-                                
-                                st.session_state.prev_indicators_state = False
-                                st.toast("Reverted to manual allocations!", icon="↩️")
-                                st.rerun()
+                        growth_split = calculate_growth_split(buffett_index)
+                        st.info(f"Growth Split 🎯 | SPYL: {growth_split['SPYL.DE']:.1f}%, IXUA: {growth_split['IXUA.DE']:.1f}%, VFEA: {growth_split['VFEA.DE']:.1f}%")
 
-                        # Update state for next check if it was OFF->ON
-                        if use_market_indicators and not st.session_state.prev_indicators_state:
-                            st.session_state.prev_indicators_state = True
-                        
-                        if use_market_indicators:
-                            # Buffett Input
-                            buffett_index_key = f"{selected_portfolio}_buffett_index"
-                            buffett_index = st.number_input(
-                                "Buffett Indicator (%)", 
-                                key=buffett_index_key,
-                                step=0.1, 
-                                help="Market Cap to GDP",
-                                on_change=clear_recommendations
-                            )
-                            
-                            # Rebalancing Logic
-                            target_spyl = 65.0 - (buffett_index - 130.0) * 0.15
-                            target_spyl = float(round(max(50.0, min(70.0, target_spyl))))
-                            
-                            rest = 100.0 - target_spyl
-                            target_vfea = float(round(max(10.0, rest * 0.30)))
-                            target_ixua = rest - target_vfea
-                            
-                            status_msg = f"{selected_portfolio} Strategy 🎯 | SPYL: {target_spyl:.0f}%, IXUA: {target_ixua:.0f}%, VFEA.DE: {target_vfea:.0f}%"
-                            st.info(f"Market Status: **{status_msg}**")
-                            
-                            # Apply specifically to the tickers ONLY if changed to prevent loop
-                            # Track if we need to apply target updates
-                            buffett_changed = st.session_state.get('last_applied_buffett') != buffett_index
-                            indicators_just_enabled = not st.session_state.get('prev_indicators_state', False)
-                            
-                            if buffett_changed or indicators_just_enabled:
-                                existing_tickers = {s['name'].upper() for s in st.session_state.stocks}
-                                carteira_10_10 = [("SPYL.DE", target_spyl), ("IXUA.DE", target_ixua), ("VFEA.DE", target_vfea)]
-                                
-                                updated_any = False
-                                for target_ticker, target_alloc in carteira_10_10:
-                                    if target_ticker in existing_tickers:
-                                        for i, stock in enumerate(st.session_state.stocks):
-                                            if stock['name'].upper() == target_ticker:
-                                                # Update target allocation if Buffett Index changed
-                                                if stock['target_allocation'] != target_alloc:
-                                                    st.session_state.stocks[i]['target_allocation'] = target_alloc
-                                                    widget_key = f"{selected_portfolio}_{i}_target"
-                                                    st.session_state[widget_key] = target_alloc
-                                                    updated_any = True
-                                                
-                                                # ONLY reset tolerance to 5.0 if indicators were JUST enabled
-                                                if indicators_just_enabled and stock.get('tolerance') != 5.0:
-                                                    st.session_state.stocks[i]['tolerance'] = 5.0
-                                                    updated_any = True
-                                                break
-                                    else:
-                                        # Auto-inject if missing
-                                        st.session_state.stocks.append({
-                                            "name": target_ticker,
-                                            "current_value": 0.0,
-                                            "target_allocation": target_alloc,
-                                            "tolerance": 5.0,
-                                            "expense_ratio": 0.0,
-                                            "full_name": target_ticker,
-                                            "sector": "", "industry": "", "country": "", "currency": "EUR", 
-                                            "quantity": 0.0, "average_price": 0.0, "dividend_yield": 0.0
-                                        })
-                                        idx = len(st.session_state.stocks) - 1
-                                        st.session_state[f"{selected_portfolio}_{idx}_target"] = target_alloc
-                                        updated_any = True
-                                
-                                st.session_state.last_applied_buffett = buffett_index
-                                if updated_any:
-                                    st.rerun()
-                        else:
-                            buffett_index = 195.0
-                            
-                            current_targets_map = {}
-                            for _, row in user_portfolio_df.iterrows():
-                                current_targets_map[row['stock_name']] = float(row['target_allocation'])
-                            
-                            st.session_state.saved_manual_targets[selected_portfolio] = current_targets_map
-                    else:
-                        use_market_indicators = False
+
             else:
                 # Still need defaults for variables used later even if hidden
                 monthly_investment = 0.0
@@ -1314,13 +1698,13 @@ elif authentication_status:
             fig_global.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                margin=dict(t=30, b=30, l=40, r=40),
+                margin=dict(t=60, b=60, l=40, r=40),
                 showlegend=False,
-                height=450
+                height=500
             )
             fig_global.update_traces(
                 textposition='outside',
-                textinfo='percent+label', 
+                texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", 
                 textfont=dict(size=15),
                 hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
                 marker=dict(line=dict(color='rgba(0,0,0,0)', width=0))
@@ -1334,35 +1718,18 @@ elif authentication_status:
         import copy
         live_stocks = copy.deepcopy(st.session_state.stocks) if 'stocks' in st.session_state else []
         
-        # Hard-enforce Omnibus logic targeting overrides for KPIs and Charts globally
-        lc_strat = get_lifecycle_strategy("1992-01-01")
-        for s in live_stocks:
-            if s['name'] == "EGNL.UK":
-                s['target_allocation'] = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
-                s['tolerance'] = 0.0
-            elif s['name'] == "IBTE.UK":
-                s['target_allocation'] = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
-                s['tolerance'] = 0.0
-
-        # Always push vault tickers to the bottom for consistent ordering across all views
-        vault_tickers = ["EGNL.UK", "IBTE.UK"]
-        core_stocks = [s for s in live_stocks if s['name'] not in vault_tickers]
-        vault_stocks = [s for s in live_stocks if s['name'] in vault_tickers]
-        core_stocks.sort(key=lambda x: x.get('target_allocation', 0.0), reverse=True)
-        live_stocks = core_stocks + vault_stocks
+        # Custom sort order: PRAB and EGLN placed immediately after VFEA.DE
+        custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+        live_stocks.sort(key=lambda x: custom_order_list.index(x.get('name', '')) if x.get('name', '') in custom_order_list else 99)
 
         # --- Top Row: KPI Cards ---
-        total_current = sum(s['current_value'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
-        total_target = sum(s['target_allocation'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
+        total_current = sum(s['current_value'] for s in live_stocks)
+        total_target = sum(s['target_allocation'] for s in live_stocks)
         num_stocks = len(live_stocks)
         
         # Dashboard Header
-        st.markdown(f"## 📊 {selected_portfolio} Dashboard")
-        
-        # Lifecycle Info Display (Exclusively for Gold & Bonds)
-        if p_type == "Gold & Bonds":
-            strategy = get_lifecycle_strategy('1992-01-01')
-            st.info(f"🧬 **{strategy['phase']}** (Investor Age: {strategy['age']})")
+        formatted_title = format_portfolio_name(selected_portfolio) if "format_portfolio_name" in locals() else f"📊 {selected_portfolio}"
+        st.markdown(f"## {formatted_title} Dashboard")
         
         # Calculate Current Weighted TER for KPI (including all assets in THIS selected portfolio)
         total_ter_sum = 0.0
@@ -1388,107 +1755,13 @@ elif authentication_status:
             with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
             with kpi_cols[2]: render_kpi_card("Sectors", f"{num_sectors}")
         else:
-            if p_type == "Gold & Bonds":
-                # Special KPIs for Gold & Bonds Unified
-                master_df = st.session_state.master_data
-                user_mask = master_df['username'] == username
-                
-                acc_ports = master_df[user_mask & (master_df['portfolio_type'] == "Accumulation")]
-                div_ports = master_df[user_mask & (master_df['portfolio_type'] == "Dividends")]
-                
-                acc_port_name = acc_ports['portfolio_name'].iloc[0] if not acc_ports.empty else "Accumulation"
-                div_port_name = div_ports['portfolio_name'].iloc[0] if not div_ports.empty else "Dividends"
-                
-                acc_ports_core = acc_ports[~acc_ports['stock_name'].isin(["EGNL.UK", "IBTE.UK"])]
-                div_ports_core = div_ports[~div_ports['stock_name'].isin(["EGNL.UK", "IBTE.UK"])]
-                
-                acc_val = float(acc_ports_core['current_value'].sum())
-                div_val = float(div_ports_core['current_value'].sum())
-                
-                # Targets specifically based on Lifecycle Strategy applied to Core value
-                gold_target_val = (acc_val * 0.03) + (div_val * 0.06)
-                bond_target_val = (acc_val * 0.04) + (div_val * 0.04)
-                total_strategy_target = gold_target_val + bond_target_val
-
-                def get_sum_kpi(df, ticker):
-                    return float(df[df['stock_name'] == ticker]['current_value'].sum() if not df.empty else 0.0)
-                    
-                total_vault_current = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(div_ports, "EGNL.UK") + get_sum_kpi(acc_ports, "IBTE.UK") + get_sum_kpi(div_ports, "IBTE.UK")
-
-                # Individual Gaps for Breakdown
-                current_gold = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(div_ports, "EGNL.UK")
-                current_bonds = get_sum_kpi(acc_ports, "IBTE.UK") + get_sum_kpi(div_ports, "IBTE.UK")
-                
-                gold_diff = current_gold - gold_target_val
-                bond_diff = current_bonds - bond_target_val
-                
-                gold_status = f"✅ €{gold_target_val:,.2f}" if gold_diff >= 0 else f"€{abs(gold_diff):,.2f}"
-                bond_status = f"✅ €{bond_target_val:,.2f}" if bond_diff >= 0 else f"€{abs(bond_diff):,.2f}"
-
-                # Portfolio-level Gaps
-                # Acc Target: Gold(3%) + Bonds(4%) | Div Target: Gold(6%) + Bonds(4%)
-                acc_vault_target = (acc_val * 0.03) + (acc_val * 0.04)
-                div_vault_target = (div_val * 0.06) + (div_val * 0.04)
-                
-                acc_vault_curr = get_sum_kpi(acc_ports, "EGNL.UK") + get_sum_kpi(acc_ports, "IBTE.UK")
-                div_vault_curr = get_sum_kpi(div_ports, "EGNL.UK") + get_sum_kpi(div_ports, "IBTE.UK")
-                
-                acc_gap_val = acc_vault_curr - acc_vault_target
-                div_gap_val = div_vault_curr - div_vault_target
-                
-                acc_status = f"✅ Target €{acc_vault_target:,.2f}" if acc_gap_val >= 0 else f"€{abs(acc_gap_val):,.2f}"
-                div_status = f"✅ Target €{div_vault_target:,.2f}" if div_gap_val >= 0 else f"€{abs(div_gap_val):,.2f}"
-
-                # Recalculate Weighted TER for Gold & Bonds using actual vault values
-                gold_ter = 0.0
-                bonds_ter = 0.0
-                
-                if not master_df.empty:
-                    # Look up TER from across all portfolios where the user might have defined it
-                    egnl_mask = (master_df['username'] == username) & (master_df['stock_name'] == "EGNL.UK")
-                    ibte_mask = (master_df['username'] == username) & (master_df['stock_name'] == "IBTE.UK")
-                    
-                    if egnl_mask.any():
-                        ter_val = master_df.loc[egnl_mask, 'expense_ratio'].max()
-                        if pd.notna(ter_val):
-                            gold_ter = float(ter_val)
-                            
-                    if ibte_mask.any():
-                        ter_val = master_df.loc[ibte_mask, 'expense_ratio'].max()
-                        if pd.notna(ter_val):
-                            bonds_ter = float(ter_val)
-
-                
-                if total_vault_current > 0:
-                    weighted_ter = ((current_gold * gold_ter) + (current_bonds * bonds_ter)) / total_vault_current
-                else:
-                    weighted_ter = 0.0
-
-                # Row 1: Primary Stats
-                row1_cols = st.columns(3)
-                with row1_cols[0]: render_kpi_card("Current Value", f"€{total_vault_current:,.2f}")
-                
-                diff = total_vault_current - total_strategy_target
-                status_txt = "✅ Gold/Bonds at Target" if diff >= 0 else f"€{abs(diff):,.2f}"
-                with row1_cols[1]: render_kpi_card("Gap to Target (Total)", status_txt)
-                with row1_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
-
-                # Row 2: Detailed Breakdown
-                # st.markdown("---")
-                # st.markdown("##### 📍 Gaps Breakdown")
-                row2_cols = st.columns(4)
-                with row2_cols[0]: render_kpi_card("Gap to Target (Bonds)", bond_status)
-                with row2_cols[1]: render_kpi_card("Gap to Target (Gold)", gold_status)
-                with row2_cols[2]: render_kpi_card(f"Gap to Target ({acc_port_name})", acc_status)
-                with row2_cols[3]: render_kpi_card(f"Gap to Target ({div_port_name})", div_status)
-            else:
-                kpi_cols = st.columns(4)
-                with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
-                with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
-                with kpi_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
-                with kpi_cols[3]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
+            kpi_cols = st.columns(4)
+            with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
+            with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
+            with kpi_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
+            with kpi_cols[3]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
         
-        if p_type not in ["Stocks", "Gold & Bonds"] and abs(total_target - 100.0) > 0.01:
+        if p_type != "Stocks" and abs(total_target - 100.0) > 0.01:
             st.warning("⚠️ Your target allocations do not sum to 100%. Please adjust them in Portfolio Management.")
 
         # --- Tab Routing Logic ---
@@ -1496,11 +1769,9 @@ elif authentication_status:
         tab_list = []
         if p_type == "Stocks":
             tab_list = ["📈 Portfolio Details", "🪙 Uninvested Cash"]
-        elif p_type == "Dividends":
+        elif p_type == "Unified":
             tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
-        elif p_type == "Gold & Bonds":
-            tab_list = ["🏦 Omnibus Vault", "🪙 Uninvested Cash"]
-        else: # Other
+        else: # Kids
             tab_list = ["📊 Manage Portfolio", "🪙 Uninvested Cash"]
             
         if selected_portfolio and "conviction" in selected_portfolio.lower():
@@ -1532,39 +1803,21 @@ elif authentication_status:
                             # Slice to only include core rebalancing columns for this tab
                             # Keep 'name' as a column to style the ticker too
                             core_cols = ["name", "current_value", "target_allocation", "tolerance", "expense_ratio"]
-                            if p_type == "Dividends":
-                                core_cols.append("current_price")
                             
                             available_core = [c for c in core_cols if c in current_stocks_df.columns]
                             current_stocks_df = current_stocks_df[available_core]
 
-                            # Auto-force Lifecycle Targets for Gold & Bonds inside any Portfolio
-                            lc_strat = get_lifecycle_strategy("1992-01-01")
-                            vault_tickers = ["EGNL.UK", "IBTE.UK"]
-                            
-                            for ticker in vault_tickers:
-                                if ticker in current_stocks_df['name'].values:
-                                    target_key = 'gold' if ticker == "EGNL.UK" else 'bonds'
-                                    target_weight = lc_strat['acc'][target_key] if p_type == "Accumulation" else lc_strat['div'][target_key]
-                                    
-                                    mask = current_stocks_df['name'] == ticker
-                                    current_stocks_df.loc[mask, "target_allocation"] = target_weight
-                                    current_stocks_df.loc[mask, "tolerance"] = 0.0 # Force tolerance to 0 for precision
 
-                            # Always push vault tickers to the bottom
-                            mask_vault = current_stocks_df['name'].isin(vault_tickers)
-                            core_df = current_stocks_df[~mask_vault].sort_values(by="target_allocation", ascending=False)
-                            vault_df = current_stocks_df[mask_vault]
-                            current_stocks_df = pd.concat([core_df, vault_df])
+
+                            # Custom order logic
+                            custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                            current_stocks_df['order_idx'] = current_stocks_df['name'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
+                            current_stocks_df = current_stocks_df.sort_values(by='order_idx').drop(columns=['order_idx'])
                         else:
                             current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
                         
                         # Simple row-level styling
                         def style_rows_mgmt(row):
-                            ticker = str(row.get("name", ""))
-                            is_vault = any(v in ticker for v in ["EGNL.UK", "IBTE.UK"])
-                            if is_vault:
-                                return ['background-color: #1c2537;' for _ in row.index]
                             return ['' for _ in row.index]
                         
                         styled_mgmt_df = current_stocks_df.style.apply(style_rows_mgmt, axis=1)
@@ -1574,12 +1827,13 @@ elif authentication_status:
                             "name": st.column_config.TextColumn("Ticker", required=True, disabled=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn(
-                                "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.1f%%", 
-                                disabled=(p_type in ["Kids"])
+                                "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.2f%%", 
+                                disabled=(p_type in ["Kids", "Unified"])
                             ),
                             "current_price": st.column_config.NumberColumn("Price (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "tolerance": st.column_config.NumberColumn(
-                                "Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%"
+                                "Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%",
+                                disabled=(p_type in ["Unified"])
                             ),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -1765,231 +2019,289 @@ elif authentication_status:
                         if st.session_state.get('show_save_success'):
                             st.success("All changes saved successfully!")
                             st.session_state.show_save_success = False
-        
                 with col_side:
                     with st.container(border=True):
                         st.subheader("🎯 Action Center")
                         if st.button("🧮 Calculate Allocation", width="stretch"):
-                            import copy
-                            live_stocks = copy.deepcopy(st.session_state.stocks)
-                            
-                            # Hard-enforce Omnibus target reservations during calculation
-                            lc_strat = get_lifecycle_strategy("1992-01-01")
-                            for s in live_stocks:
-                                if s['name'] == "EGNL.UK":
-                                    s['target_allocation'] = lc_strat['acc']['gold'] if p_type == "Accumulation" else lc_strat['div']['gold']
-                                    s['tolerance'] = 0.0
-                                elif s['name'] == "IBTE.UK":
-                                    s['target_allocation'] = lc_strat['acc']['bonds'] if p_type == "Accumulation" else lc_strat['div']['bonds']
-                                    s['tolerance'] = 0.0
+                            if p_type == "Unified":
+                                import copy
+                                live_stocks = copy.deepcopy(st.session_state.stocks)
+                                current_monthly_base = float(monthly_investment)
+                                
+                                # Prepare current values
+                                current_values = {s['name']: s['current_value'] for s in live_stocks}
+                                
+                                # Extract investor's age
+                                birth_date_str = st.session_state.get(f"{selected_portfolio}_investor_birth_date", "1992-01-01")
+                                try:
+                                    birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
+                                    today = date.today()
+                                    age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+                                except Exception:
+                                    age = 34
                                     
-                            total_current_global = sum(s['current_value'] for s in live_stocks)
-                            core_target_live = sum(s['target_allocation'] for s in live_stocks if s['name'] not in ("EGNL.UK", "IBTE.UK"))
-        
-                            # The Core stocks must strictly sum to 100%
-                            if p_type != "Gold & Bonds" and abs(core_target_live - 100.0) > 0.01:
-                                st.error(f"As suas ações base somam {core_target_live:.1f}%. Ajuste para que somem exatamente 100% (o Ouro e Obrigações são deduzidos à parte de forma transparente).")
+                                # Extract Buffett Index
+                                buffett_index = float(st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0))
+                                
+                                # Execute monthly buys logic
+                                try:
+                                    buys_data = calculate_monthly_buys(
+                                        age=age,
+                                        buffett_index=buffett_index,
+                                        current_values=current_values,
+                                        monthly_contribution=current_monthly_base,
+                                        min_order_size=5.0
+                                    )
+                                except Exception as e:
+                                    st.error(f"Error calculating Unified buys: {e}")
+                                    st.stop()
+                                    
+                                portfolio_targets = buys_data["portfolio_targets"]
+                                current_weights = buys_data["current_weights"]
+                                buys_map = buys_data["buys"]
+                                leftover_cash = buys_data["leftover_cash"]
+                                
+                                portfolio_value_before = buys_data["portfolio_value_before"]
+                                portfolio_value_after = buys_data["portfolio_value_after"]
+                                
+                                allocations = []
+                                for stock in live_stocks:
+                                    ticker = stock['name']
+                                    final_invest = buys_map.get(ticker, 0.0)
+                                    target_pct = portfolio_targets.get(ticker, 0.0)
+                                    target_val = portfolio_value_after * (target_pct / 100.0)
+                                    new_val = stock['current_value'] + final_invest
+                                    
+                                    allocations.append({
+                                        "Stock": ticker,
+                                        "Current Value": stock['current_value'],
+                                        "Current %": current_weights.get(ticker, 0.0),
+                                        "TER %": stock.get('expense_ratio', 0.0),
+                                        "Target %": target_pct,
+                                        "Target Value": target_val,
+                                        "Investment": final_invest,
+                                        "New Value": new_val,
+                                        "New %": (new_val / portfolio_value_after * 100) if portfolio_value_after > 0 else 0
+                                    })
+                                
+                                invest_map = buys_map
+                                total_current_live = portfolio_value_before
+                                current_monthly_base = current_monthly_base
+                                remaining_investment = leftover_cash
+                                
+                                if 'vault_alloc_by_portfolio' not in st.session_state:
+                                    st.session_state.vault_alloc_by_portfolio = {}
+                                st.session_state.vault_alloc_by_portfolio[selected_portfolio] = {
+                                    "type": p_type,
+                                    "EGLN.UK": buys_map.get("EGLN.UK", 0.0),
+                                    "PRAB.DE": buys_map.get("PRAB.DE", 0.0),
+                                }
+                                
+                                import pandas as pd
+                                alloc_df = pd.DataFrame(allocations)
+                                if not alloc_df.empty:
+                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                                    alloc_df['order_idx'] = alloc_df['Stock'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
+                                    alloc_df = alloc_df.sort_values(by='order_idx').drop(columns=['order_idx'])
+                                    
+                                st.session_state.last_calculation = {
+                                    "df": alloc_df,
+                                    "monthly_investment": current_monthly_base,
+                                    "remaining": remaining_investment
+                                }
+                                st.session_state.show_recommendations = True
                             else:
-                                import math
+                                import copy
+                                live_stocks = copy.deepcopy(st.session_state.stocks)
                                 
-                                # Current local Monthly Investment (from Sidebar or Auto)
-                                current_monthly_base = float(monthly_investment) 
-                                is_dividends_p = (p_type == "Dividends") or (selected_portfolio and "dividends" in selected_portfolio.lower())
-                                
-                                global_theoretical = total_current_global + current_monthly_base
-                                remaining_investment = float(current_monthly_base)
-                                
-                                # Initial map for all stocks
-                                final_investments = {s['name']: 0.0 for s in live_stocks}
-                                stocks_to_process = [s for s in live_stocks]
-                                
-                                # --- STEP 0.5: Omnibus Interceptor (Vault) ---
-                                # Intercept fixed percentage but capped strictly by the Local Portfolio Gap
-                                for omni_ticker in ["EGNL.UK", "IBTE.UK"]:
-                                    omni_stock = next((s for s in stocks_to_process if s['name'] == omni_ticker), None)
-                                    if omni_stock:
-                                        target_val = global_theoretical * (omni_stock['target_allocation'] / 100.0)
-                                        gap = max(0.0, target_val - omni_stock['current_value'])
-                                        
-                                        # Strict Cap: Cannot exceed its structural slice of the new cash, nor its local gap.
-                                        max_slice = current_monthly_base * (omni_stock['target_allocation'] / 100.0)
-                                        alloc = min(max_slice, gap)
-                                        
-                                        final_investments[omni_ticker] = alloc
-                                        remaining_investment -= alloc
-                                        
-                                # Remove Omnibus from Core Processing Group
-                                stocks_to_process = [s for s in stocks_to_process if s['name'] not in ("EGNL.UK", "IBTE.UK")]
-                                
-                                # Formally set Rebased Totals so Core targets (which sum to 100%) distribute flawlessly
-                                total_current_live = sum(s['current_value'] for s in stocks_to_process)
-                                total_theoretical = total_current_live + remaining_investment
-                                
-                                # --- STEP 1: Special Handling for RENE.PT...
-                                if is_dividends_p:
-                                    rene_stock = next((s for s in live_stocks if s['name'].upper() == "RENE.PT"), None)
-                                    if rene_stock:
-                                        target_val = total_theoretical * (rene_stock['target_allocation'] / 100.0)
-                                        gap = target_val - rene_stock['current_value']
-                                        price = rene_stock.get('current_price', 0.0)
-                                        
-                                        invest_real = 0.0
-                                        if gap > 0 and price > 0:
-                                            # Determine integer quantity based on Gap
-                                            qty = math.floor(gap / price)
-                                            invest_real = qty * price
-                                            
-                                            # Cap by available monthly investment
-                                            if invest_real > remaining_investment:
-                                                qty = math.floor(remaining_investment / price)
-                                                invest_real = qty * price
-                                            
-                                            # MinBuy check (5€)
-                                            if invest_real < 5.0 and invest_real > 0:
-                                                invest_real = 0.0
-                                        
-                                        final_investments[rene_stock['name']] = invest_real
-                                        remaining_investment -= invest_real
-                                        # Remove RENE from the common pool for the next phases
-                                        stocks_to_process = [s for s in stocks_to_process if s['name'].upper() != "RENE.PT"]
-
-                                # --- STEP 2: Standard Rebalancing Algorithm for Remaining Stocks ---
-                                if remaining_investment > 0 and stocks_to_process:
-                                    # Phase A: Calculate Gaps and identify deviations
-                                    stock_data_p = []
-                                    sum_positive_deviations = 0.0
-                                    
-                                    for stock in stocks_to_process:
-                                        current_weight = (stock['current_value'] / total_current_live * 100.0) if total_current_live > 0 else 0.0
-                                        target_weight = stock['target_allocation']
-                                        deviation = target_weight - current_weight
-                                        
-                                        min_band = target_weight - stock.get('tolerance', 0.0)
-                                        below_min_band = current_weight < min_band
-                                        below_target = deviation > 0
-                                        
-                                        if below_target:
-                                            # Note: We don't cap by max_band here as requested for Dividends redistribution logic
-                                            sum_positive_deviations += deviation
-                                            
-                                        target_val = total_theoretical * (target_weight / 100.0)
-                                        gap = target_val - stock['current_value']
-                                        
-                                        stock_data_p.append({
-                                            'name': stock['name'],
-                                            'Gap': gap,
-                                            'stock': stock,
-                                            'deviation': deviation,
-                                            'below_min_band': below_min_band,
-                                            'below_target': below_target,
-                                            'invest': 0.0
-                                        })
-                                    
-                                    # Phase B: Priority for assets below the minimum band (Emergency)
-                                    total_needed_band = 0.0
-                                    for item in stock_data_p:
-                                        if item['below_min_band']:
-                                            min_band_eur = total_theoretical * ((item['stock']['target_allocation'] - item['stock'].get('tolerance', 0.0)) / 100.0)
-                                            needed = max(0.0, min_band_eur - item['stock']['current_value'])
-                                            item['needed_band'] = needed
-                                            total_needed_band += needed
-                                        else:
-                                            item['needed_band'] = 0.0
-                                            
-                                    if total_needed_band > 0 and remaining_investment > 0:
-                                        if total_needed_band <= remaining_investment:
-                                            for item in stock_data_p:
-                                                if item['needed_band'] > 0:
-                                                    alloc = item['needed_band']
-                                                    item['invest'] += alloc
-                                                    remaining_investment -= alloc
-                                        else:
-                                            # Proportional distribution of emergency funds
-                                            emergency_funds = remaining_investment
-                                            for item in stock_data_p:
-                                                if item['needed_band'] > 0:
-                                                    prop_alloc = (item['needed_band'] / total_needed_band) * emergency_funds
-                                                    item['invest'] += prop_alloc
-                                            remaining_investment = 0.0
-                                    
-                                    # Phase C: Proportional Gap Filling
-                                    if remaining_investment > 0 and sum_positive_deviations > 0:
-                                        funds_left = remaining_investment
-                                        proportions = []
-                                        for item in stock_data_p:
-                                            if item['below_target']:
-                                                prop_alloc = (item['deviation'] / sum_positive_deviations) * funds_left
-                                                max_inv = max(0.0, item['Gap'] - item['invest'])
-                                                ideal_invest = min(prop_alloc, max_inv)
-                                                proportions.append({'item': item, 'ideal': ideal_invest})
-                                        
-                                        for p in proportions:
-                                            p['item']['invest'] += p['ideal']
-                                            remaining_investment -= p['ideal']
-                                            
-                                    # Phase D: Leftover gap filling
-                                    if remaining_investment >= 0.01:
-                                        sorted_gaps = sorted(stock_data_p, key=lambda x: x['Gap'] - x['invest'], reverse=True)
-                                        for g in sorted_gaps:
-                                            if remaining_investment < 0.01: break
-                                            needed = max(0.0, g['Gap'] - g['invest'])
-                                            if needed > 0:
-                                                alloc = min(remaining_investment, needed)
-                                                g['invest'] += alloc
-                                                remaining_investment -= alloc
-                                                
-                                    # Update final investments from the processing pool
-                                    for item in stock_data_p:
-                                        final_investments[item['name']] = item['invest']
-
-                                # --- STEP 3: Post-Processing Rule Enforcement ---
-                                if is_dividends_p:
-                                    # 1. Enforce Integer/Floor and MinBuy of 5€
-                                    total_after_round = 0.0
-                                    for ticker, invest in final_investments.items():
-                                        if ticker.upper() == "RENE.PT":
-                                            # RENE is already processed/múltiplo do preço
-                                            total_after_round += invest
-                                            continue
-                                            
-                                        # Others: Round down to integer euros
-                                        rounded_invest = float(math.floor(invest))
-                                        
-                                        # MinBuy enforcement for PT stocks
-                                        if ticker.upper().endswith(".PT") and rounded_invest < 5.0 and rounded_invest > 0:
-                                            rounded_invest = 0.0
-                                            
-                                        final_investments[ticker] = rounded_invest
-                                        total_after_round += rounded_invest
-                                        
-                                    # 2. Redistribution of Cents ("The Dump")
-                                    # All remaining budget (including cents from RENE and floors) goes to the largest investment
-                                    final_remaining = current_monthly_base - total_after_round
-                                    if final_remaining > 0:
-                                        dump_ticker = max(final_investments, key=final_investments.get)
-                                        final_investments[dump_ticker] += final_remaining
-                                        remaining_investment = 0.0
-                                    else:
-                                        remaining_investment = final_remaining
+                                total_current_global = sum(s['current_value'] for s in live_stocks)
+                                core_target_live = sum(s['target_allocation'] for s in live_stocks)
+            
+                                # The Core stocks must strictly sum to 100%
+                                if abs(core_target_live - 100.0) > 0.01:
+                                    st.error(f"As suas ações base somam {core_target_live:.1f}%. Ajuste para que somem exatamente 100%.")
                                 else:
-                                    # Standard Portfolios (Non-Dividends)
-                                    # Just apply floor to all (as per previous standard logic)
-                                    total_after_round = 0.0
-                                    for ticker, invest in final_investments.items():
-                                        rounded = float(math.floor(invest))
-                                        final_investments[ticker] = rounded
-                                        total_after_round += rounded
+                                    import math
                                     
-                                    # For standard, we usually just keep the remaining in the wallet or dump it 
-                                    # to the largest gap if small. Let's keep it consistent.
-                                    final_remaining = current_monthly_base - total_after_round
-                                    if final_remaining >= 1.0:
-                                        # Use standard "largest gap" redistribution for whole euros
-                                        sorted_gaps = sorted(final_investments.keys(), key=lambda x: next((s['target_allocation'] for s in live_stocks if s['name']==x), 0), reverse=True)
-                                        if sorted_gaps:
-                                            final_investments[sorted_gaps[0]] += float(math.floor(final_remaining))
+                                    # Current local Monthly Investment (from Sidebar or Auto)
+                                    current_monthly_base = float(monthly_investment) 
+                                    
+                                    global_theoretical = total_current_global + current_monthly_base
+                                    remaining_investment = float(current_monthly_base)
+                                    
+                                    # Initial map for all stocks
+                                    final_investments = {s['name']: 0.0 for s in live_stocks}
+                                    stocks_to_process = [s for s in live_stocks]
+                                    
 
-                                invest_map = final_investments
+                                    # Formally set Rebased Totals so Core targets (which sum to 100%) distribute flawlessly
+                                    total_current_live = sum(s['current_value'] for s in stocks_to_process)
+                                    total_theoretical = total_current_live + remaining_investment
+                                    
+                                    # --- STEP 1: Special Handling for RENE.PT...
+                                    if selected_portfolio and "dividends" in selected_portfolio.lower():
+                                        rene_stock = next((s for s in live_stocks if s['name'].upper() == "RENE.PT"), None)
+                                        if rene_stock:
+                                            target_val = total_theoretical * (rene_stock['target_allocation'] / 100.0)
+                                            gap = target_val - rene_stock['current_value']
+                                            price = rene_stock.get('current_price', 0.0)
+                                            
+                                            invest_real = 0.0
+                                            if gap > 0 and price > 0:
+                                                # Determine integer quantity based on Gap
+                                                qty = math.floor(gap / price)
+                                                invest_real = qty * price
+                                                
+                                                # Cap by available monthly investment
+                                                if invest_real > remaining_investment:
+                                                    qty = math.floor(remaining_investment / price)
+                                                    invest_real = qty * price
+                                                
+                                                # MinBuy check (5€)
+                                                if invest_real < 5.0 and invest_real > 0:
+                                                    invest_real = 0.0
+                                            
+                                            final_investments[rene_stock['name']] = invest_real
+                                            remaining_investment -= invest_real
+                                            # Remove RENE from the common pool for the next phases
+                                            stocks_to_process = [s for s in stocks_to_process if s['name'].upper() != "RENE.PT"]
+     
+                                    # --- STEP 2: Standard Rebalancing Algorithm for Remaining Stocks ---
+                                    if remaining_investment > 0 and stocks_to_process:
+                                        # Phase A: Calculate Gaps and identify deviations
+                                        stock_data_p = []
+                                        sum_positive_deviations = 0.0
+                                        
+                                        for stock in stocks_to_process:
+                                            current_weight = (stock['current_value'] / total_current_live * 100.0) if total_current_live > 0 else 0.0
+                                            target_weight = stock['target_allocation']
+                                            deviation = target_weight - current_weight
+                                            
+                                            min_band = target_weight - stock.get('tolerance', 0.0)
+                                            below_min_band = current_weight < min_band
+                                            below_target = deviation > 0
+                                            
+                                            if below_target:
+                                                # Note: We don't cap by max_band here as requested for Dividends redistribution logic
+                                                sum_positive_deviations += deviation
+                                                
+                                            target_val = total_theoretical * (target_weight / 100.0)
+                                            gap = target_val - stock['current_value']
+                                            
+                                            stock_data_p.append({
+                                                'name': stock['name'],
+                                                'Gap': gap,
+                                                'stock': stock,
+                                                'deviation': deviation,
+                                                'below_min_band': below_min_band,
+                                                'below_target': below_target,
+                                                'invest': 0.0
+                                            })
+                                        
+                                        # Phase B: Priority for assets below the minimum band (Emergency)
+                                        total_needed_band = 0.0
+                                        for item in stock_data_p:
+                                            if item['below_min_band']:
+                                                min_band_eur = total_theoretical * ((item['stock']['target_allocation'] - item['stock'].get('tolerance', 0.0)) / 100.0)
+                                                needed = max(0.0, min_band_eur - item['stock']['current_value'])
+                                                item['needed_band'] = needed
+                                                total_needed_band += needed
+                                            else:
+                                                item['needed_band'] = 0.0
+                                                
+                                        if total_needed_band > 0 and remaining_investment > 0:
+                                            if total_needed_band <= remaining_investment:
+                                                for item in stock_data_p:
+                                                    if item['needed_band'] > 0:
+                                                        alloc = item['needed_band']
+                                                        item['invest'] += alloc
+                                                        remaining_investment -= alloc
+                                            else:
+                                                # Proportional distribution of emergency funds
+                                                emergency_funds = remaining_investment
+                                                for item in stock_data_p:
+                                                    if item['needed_band'] > 0:
+                                                        prop_alloc = (item['needed_band'] / total_needed_band) * emergency_funds
+                                                        item['invest'] += prop_alloc
+                                                remaining_investment = 0.0
+                                        
+                                        # Phase C: Proportional Gap Filling
+                                        if remaining_investment > 0 and sum_positive_deviations > 0:
+                                            funds_left = remaining_investment
+                                            proportions = []
+                                            for item in stock_data_p:
+                                                if item['below_target']:
+                                                    prop_alloc = (item['deviation'] / sum_positive_deviations) * funds_left
+                                                    max_inv = max(0.0, item['Gap'] - item['invest'])
+                                                    ideal_invest = min(prop_alloc, max_inv)
+                                                    proportions.append({'item': item, 'ideal': ideal_invest})
+                                            
+                                            for p in proportions:
+                                                p['item']['invest'] += p['ideal']
+                                                remaining_investment -= p['ideal']
+                                                
+                                        # Phase D: Leftover gap filling
+                                        if remaining_investment >= 0.01:
+                                            sorted_gaps = sorted(stock_data_p, key=lambda x: x['Gap'] - x['invest'], reverse=True)
+                                            for g in sorted_gaps:
+                                                if remaining_investment < 0.01: break
+                                                needed = max(0.0, g['Gap'] - g['invest'])
+                                                if needed > 0:
+                                                    alloc = min(remaining_investment, needed)
+                                                    g['invest'] += alloc
+                                                    remaining_investment -= alloc
+                                                    
+                                        # Update final investments from the processing pool
+                                        for item in stock_data_p:
+                                            final_investments[item['name']] = item['invest']
+     
+                                    # --- STEP 3: Post-Processing Rule Enforcement ---
+                                    if is_dividends_p:
+                                        # 1. Enforce Integer/Floor and MinBuy of 5€
+                                        total_after_round = 0.0
+                                        for ticker, invest in final_investments.items():
+                                            if ticker.upper() == "RENE.PT":
+                                                # RENE is already processed/múltiplo do preço
+                                                total_after_round += invest
+                                                continue
+                                                
+                                            # Others: Round down to integer euros
+                                            rounded_invest = float(math.floor(invest))
+                                            
+                                            # MinBuy enforcement for PT stocks
+                                            if ticker.upper().endswith(".PT") and rounded_invest < 5.0 and rounded_invest > 0:
+                                                rounded_invest = 0.0
+                                                
+                                            final_investments[ticker] = rounded_invest
+                                            total_after_round += rounded_invest
+                                            
+                                        # 2. Redistribution of Cents ("The Dump")
+                                        # All remaining budget (including cents from RENE and floors) goes to the largest investment
+                                        final_remaining = current_monthly_base - total_after_round
+                                        if final_remaining > 0:
+                                            dump_ticker = max(final_investments, key=final_investments.get)
+                                            final_investments[dump_ticker] += final_remaining
+                                            remaining_investment = 0.0
+                                        else:
+                                            remaining_investment = final_remaining
+                                    else:
+                                        # Standard Portfolios (Non-Dividends)
+                                        # Just apply floor to all (as per previous standard logic)
+                                        total_after_round = 0.0
+                                        for ticker, invest in final_investments.items():
+                                            rounded = float(math.floor(invest))
+                                            final_investments[ticker] = rounded
+                                            total_after_round += rounded
+                                        
+                                        # For standard, we usually just keep the remaining in the wallet or dump it 
+                                        # to the largest gap if small. Let's keep it consistent.
+                                        final_remaining = current_monthly_base - total_after_round
+                                        if final_remaining >= 1.0:
+                                            # Use standard "largest gap" redistribution for whole euros
+                                            sorted_gaps = sorted(final_investments.keys(), key=lambda x: next((s['target_allocation'] for s in live_stocks if s['name']==x), 0), reverse=True)
+                                            if sorted_gaps:
+                                                final_investments[sorted_gaps[0]] += float(math.floor(final_remaining))
+                                    invest_map = final_investments
 
                                     # --- END EXISTING LOGIC ---
                                 
@@ -2018,7 +2330,9 @@ elif authentication_status:
                                 
                                 alloc_df = pd.DataFrame(allocations)
                                 if not alloc_df.empty:
-                                    alloc_df = alloc_df.sort_values(by="Target %", ascending=False)
+                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                                    alloc_df['order_idx'] = alloc_df['Stock'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
+                                    alloc_df = alloc_df.sort_values(by='order_idx').drop(columns=['order_idx'])
 
                                 st.session_state.last_calculation = {"df": alloc_df, "monthly_investment": current_monthly_base, "remaining": remaining_investment}
                                 st.session_state.show_recommendations = True
@@ -2048,20 +2362,13 @@ elif authentication_status:
                         # Create a display-only version by dropping columns requested by user
                         display_df = df.drop(columns=["TER %", "Target Value"])
                         
-                        # Always push vault tickers to the bottom
-                        vault_tickers = ["EGNL.UK", "IBTE.UK"]
-                        core_df = display_df[~display_df["Stock"].isin(vault_tickers)]
-                        vault_df = display_df[display_df["Stock"].isin(vault_tickers)]
-                        display_df = pd.concat([core_df, vault_df], ignore_index=True)
                         def style_rows(row):
-                            ticker = str(row.get("Stock", ""))
-                            is_vault = any(v in ticker for v in vault_tickers)
-                            if is_vault:
-                                base = 'background-color: #1c2537;'
-                                invest_style = 'background-color: #1c2537; font-weight: 700;'
+                            base = ''
+                            if row['Stock'] in ['WTEQ.DE', 'VDIV.DE', 'JMT.PT', 'EDP.PT']:
+                                invest_style = 'background-color: #2563EB; color: white; font-weight: 700; border-bottom: 1px solid #1E3A8A;'
                             else:
-                                base = ''
-                                invest_style = 'background-color: #24A16F; color: #065F46; font-weight: 700; border-bottom: 1px solid #065F46;'
+                                invest_style = 'background-color: #24A16F; color: white; font-weight: 700; border-bottom: 1px solid #065F46;'
+                                
                             return [invest_style if col == 'Investment' else base for col in row.index]
                         
                         styled_df = display_df.style.format(precision=2).apply(style_rows, axis=1)
@@ -2117,376 +2424,27 @@ elif authentication_status:
                     # Charts Row
                     with st.container(border=True):
                         st.subheader("📉 Allocation Visuals")
-                        df_plot = df[~df['Stock'].isin(["EGNL.UK", "IBTE.UK"])].sort_values('Stock')
-                        chart_col1, chart_col2 = st.columns(2)
+                        df_plot = df[~df['Stock'].isin(["EGLN.UK", "PRAB.DE"])].sort_values('Stock')
                         
-                        dashboard_colors = ['#FF8B76', '#7BD192', '#5EB1FF', '#FFD166', '#06D6A0']
-                        
-                        # Mobile Optimization: Place legend horizontal (top/bottom) to save width
-                        common_legend = dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
-                        
-                        with chart_col1:
-                            fig1 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['Current Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
-                            fig1.update_layout(
-                                title_text="Current Allocation", 
-                                title_font=dict(size=20), 
-                                legend=common_legend,
-                                font=dict(size=14),
-                                margin=dict(t=80, b=80, l=10, r=10),
-                                paper_bgcolor='rgba(0,0,0,0)', 
-                                plot_bgcolor='rgba(0,0,0,0)'
-                            )
-                            st.plotly_chart(fig1, use_container_width=True)
-                        with chart_col2:
-                            fig2 = go.Figure(data=[go.Pie(labels=df_plot['Stock'], values=df_plot['New Value'], hole=0.3, marker=dict(colors=dashboard_colors))])
-                            fig2.update_layout(
-                                title_text="After Investment", 
-                                title_font=dict(size=20), 
-                                legend=common_legend,
-                                font=dict(size=14),
-                                margin=dict(t=80, b=80, l=10, r=10),
-                                paper_bgcolor='rgba(0,0,0,0)', 
-                                plot_bgcolor='rgba(0,0,0,0)'
-                            )
-                            st.plotly_chart(fig2, use_container_width=True)
+                        st.markdown("<h4 style='text-align: center; color: #1f2937; margin-bottom: 0px;'>After Investment</h4>", unsafe_allow_html=True)
+                        fig_after = px.pie(df_plot, values='New Value', names='Stock', hole=0.75, color_discrete_sequence=CHART_PALETTE)
+                        fig_after.update_layout(
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            margin=dict(t=60, b=60, l=40, r=40),
+                            showlegend=False,
+                            height=450
+                        )
+                        fig_after.update_traces(
+                            sort=False,
+                            textposition='outside',
+                            texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", 
+                            textfont=dict(size=14),
+                            hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>",
+                            marker=dict(line=dict(color='rgba(0,0,0,0)', width=0))
+                        )
+                        st.plotly_chart(fig_after, use_container_width=True)
 
-        if "🏦 Omnibus Vault" in tab_map:
-            with tab_map["🏦 Omnibus Vault"]:
-                st.session_state.footer_msg = "<b>Omnibus Vault:</b> Gerir o cofre físico de Ouro e Obrigações partilhado pelas suas carteiras."
-                uninvested_cash = float(st.session_state.get(f"{selected_portfolio}_uninvested_cash", 0.0))
-                if uninvested_cash > 0:
-                    st.info(f"💡 You have **€{uninvested_cash:,.2f}** of uninvested cash. You can manage it in the 'Uninvested Cash' tab.", icon="🪙")
-                
-                master_df = st.session_state.master_data
-                user_mask = master_df['username'] == username
-                
-                # Check for legacy "Gold & Bonds" entries
-                legacy_gb = master_df[user_mask & (master_df['portfolio_type'] == "Gold & Bonds") & (master_df['stock_name'].isin(['EGNL.UK', 'IBTE.UK']))]
-                if not legacy_gb.empty:
-                    st.error("⚠️ **Ação Necessária**: Tem ativos a utilizar a versão antiga do sistema Gold & Bonds. É necessário migrar para o novo modelo de 'Cofre e Subcontas'.")
-                    if st.button("🚀 Iniciar Migração Automática", help="Divide fisicamente os valores na base de dados entre as contas de Acumulação e Dividendos, com base no peso de cada carteira."):
-                        with st.spinner("A migrar..."):
-                            data = master_df.copy()
-                            acc_ports = data[user_mask & (data['portfolio_type'] == "Accumulation")]
-                            div_ports = data[user_mask & (data['portfolio_type'] == "Dividends")]
-                            gb_ports = legacy_gb
-                            
-                            acc_val = float(acc_ports['current_value'].sum()) if not acc_ports.empty else 0.0
-                            div_val = float(div_ports['current_value'].sum()) if not div_ports.empty else 0.0
-                            total_base = acc_val + div_val
-                            
-                            if total_base == 0:
-                                acc_ratio = 0.5
-                                div_ratio = 0.5
-                            else:
-                                acc_ratio = acc_val / total_base
-                                div_ratio = div_val / total_base
-                            
-                            # Clean legacy
-                            data = data[~((data['username'] == username) & (data['portfolio_type'] == "Gold & Bonds"))]
-                            
-                            new_rows = []
-                            for _, row in gb_ports.iterrows():
-                                stock = row['stock_name']
-                                val = float(row['current_value'])
-                                
-                                acc_row = row.copy()
-                                acc_row['portfolio_type'] = "Accumulation"
-                                acc_row['portfolio_name'] = acc_ports['portfolio_name'].iloc[0] if not acc_ports.empty else "Accumulation"
-                                acc_row['current_value'] = val * acc_ratio
-                                acc_row['target_allocation'] = 0.0
-                                
-                                div_row = row.copy()
-                                div_row['portfolio_type'] = "Dividends"
-                                div_row['portfolio_name'] = div_ports['portfolio_name'].iloc[0] if not div_ports.empty else "Dividends"
-                                div_row['current_value'] = val * div_ratio
-                                div_row['target_allocation'] = 0.0
-                                
-                                new_rows.append(acc_row)
-                                new_rows.append(div_row)
-                            
-                            if new_rows:
-                                # placeholder to keep the View-Only tab valid
-                                placeholder = gb_ports.iloc[0].copy()
-                                placeholder['stock_name'] = "__PLACEHOLDER__"
-                                placeholder['current_value'] = 0.0
-                                placeholder['target_allocation'] = 0.0
-                                new_rows.append(placeholder)
-                                
-                                data = pd.concat([data, pd.DataFrame(new_rows)], ignore_index=True)
-                            
-                            conn.update(worksheet="Portfolios", data=data)
-                            st.session_state.master_data = data
-                            st.success("✅ Cofre migrado com sucesso!")
-                            st.rerun()
-                else:
-                    
-                    # Fetch current distributed values
-                    acc_df = master_df[user_mask & (master_df['portfolio_type'] == "Accumulation")]
-                    div_df = master_df[user_mask & (master_df['portfolio_type'] == "Dividends")]
-                    
-                    acc_port_name = acc_df['portfolio_name'].iloc[0] if not acc_df.empty else "Accumulation"
-                    div_port_name = div_df['portfolio_name'].iloc[0] if not div_df.empty else "Dividends"
-                    
-                    def get_sum(df, ticker):
-                        return float(df[df['stock_name'] == ticker]['current_value'].sum() if not df.empty else 0.0)
-                        
-                    acc_gold = get_sum(acc_df, "EGNL.UK")
-                    div_gold = get_sum(div_df, "EGNL.UK")
-                    total_gold = acc_gold + div_gold
-                    
-                    acc_bonds = get_sum(acc_df, "IBTE.UK")
-                    div_bonds = get_sum(div_df, "IBTE.UK")
-                    total_bonds = acc_bonds + div_bonds
-                    
-
-                    
-                    if 'omni_messages' in st.session_state and st.session_state.omni_messages:
-                        for msg_type, msg in st.session_state.omni_messages:
-                            if msg_type == 'success':
-                                st.success(msg)
-                            elif msg_type == 'error':
-                                st.error(msg)
-                            elif msg_type == 'warning':
-                                st.warning(msg)
-                        st.session_state.omni_messages = [] # Clear after showing
-                        
-                    # Create structured table
-                    lc_strat = get_lifecycle_strategy("1992-01-01")
-                    acc_total = float(acc_df['current_value'].sum() if not acc_df.empty else 0.0)
-                    div_total = float(div_df['current_value'].sum() if not div_df.empty else 0.0)
-                    
-                    target_acc_gold_eur = acc_total * (lc_strat['acc']['gold'] / 100.0)
-                    target_acc_bonds_eur = acc_total * (lc_strat['acc']['bonds'] / 100.0)
-                    target_div_gold_eur = div_total * (lc_strat['div']['gold'] / 100.0)
-                    target_div_bonds_eur = div_total * (lc_strat['div']['bonds'] / 100.0)
-                    
-                    def calc_prog(current, target):
-                        if target <= 0.0: return 100.0 if current >= 0 else 0.0
-                        return min((current / target) * 100.0, 100.0)
-
-                    acc_vault_data = []
-                    div_vault_data = []
-                    
-                    acc_vault_data.append({
-                        "Asset": "Gold (EGNL.UK)", "Current (€)": acc_gold,
-                        "Target (%)": lc_strat['acc']['gold'], "Target (€)": target_acc_gold_eur, "Progress": calc_prog(acc_gold, target_acc_gold_eur)
-                    })
-                    div_vault_data.append({
-                        "Asset": "Gold (EGNL.UK)", "Current (€)": div_gold,
-                        "Target (%)": lc_strat['div']['gold'], "Target (€)": target_div_gold_eur, "Progress": calc_prog(div_gold, target_div_gold_eur)
-                    })
-                    
-                    acc_vault_data.append({
-                        "Asset": "Bonds (IBTE.UK)", "Current (€)": acc_bonds,
-                        "Target (%)": lc_strat['acc']['bonds'], "Target (€)": target_acc_bonds_eur, "Progress": calc_prog(acc_bonds, target_acc_bonds_eur)
-                    })
-                    div_vault_data.append({
-                        "Asset": "Bonds (IBTE.UK)", "Current (€)": div_bonds,
-                        "Target (%)": lc_strat['div']['bonds'], "Target (€)": target_div_bonds_eur, "Progress": calc_prog(div_bonds, target_div_bonds_eur)
-                    })
-                        
-                    shared_column_config = {
-                        "Current (€)": st.column_config.NumberColumn(format="€%.2f"),
-                        "Target (%)": st.column_config.NumberColumn(format="%.1f%%"),
-                        "Target (€)": st.column_config.NumberColumn(format="€%.2f"),
-                        "Progress": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100)
-                    }
-                    
-                    target_global_gold_eur = target_acc_gold_eur + target_div_gold_eur
-                    target_global_bonds_eur = target_acc_bonds_eur + target_div_bonds_eur
-                    
-                    global_vault_data = [
-                        {
-                            "Asset": "Gold (EGNL.UK)", 
-                            "Current (€)": total_gold,
-                            "Target (€)": target_global_gold_eur, 
-                            "Progress": calc_prog(total_gold, target_global_gold_eur)
-                        },
-                        {
-                            "Asset": "Bonds (IBTE.UK)", 
-                            "Current (€)": total_bonds,
-                            "Target (€)": target_global_bonds_eur, 
-                            "Progress": calc_prog(total_bonds, target_global_bonds_eur)
-                        }
-                    ]
-                    
-                    st.markdown("##### 🌍 Global Overview")
-                    st.dataframe(pd.DataFrame(global_vault_data), use_container_width=True, hide_index=True, column_config={
-                        "Current (€)": st.column_config.NumberColumn(format="€%.2f"),
-                        "Target (€)": st.column_config.NumberColumn(format="€%.2f"),
-                        "Progress": st.column_config.ProgressColumn(format="%.1f%%", min_value=0, max_value=100)
-                    })
-                    
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"##### 🟢 {acc_port_name}")
-                        st.dataframe(pd.DataFrame(acc_vault_data), use_container_width=True, hide_index=True, column_config=shared_column_config)
-                    with col2:
-                        st.markdown(f"##### 🔵 {div_port_name}")
-                        st.dataframe(pd.DataFrame(div_vault_data), use_container_width=True, hide_index=True, column_config=shared_column_config)
-                    
-                    st.markdown("#### 🔄 Market Fluctuations Sync")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        new_gold_total = st.number_input("Market Value: Physical Gold", value=total_gold, min_value=0.0, step=0.01)
-                    with col2:
-                        new_bonds_total = st.number_input("Market Value: Bonds", value=total_bonds, min_value=0.0, step=0.01)
-
-                    if st.button("💾 Sync New Prices with Vault", width="stretch"):
-                        data = master_df.copy()
-                        updates_made = 0
-                        st.session_state.omni_messages = []
-                        
-                        # Process Gold Update
-                        if abs(new_gold_total - total_gold) > 0.01:
-                            if total_gold > 0:
-                                acc_gold_ratio = acc_gold / total_gold
-                                div_gold_ratio = div_gold / total_gold
-                            else:
-                                # Use core portfolio value (excl. vault tickers) — same as "Total Value" KPI
-                                vault_tickers_set = {"EGNL.UK", "IBTE.UK"}
-                                acc_val = float(acc_df[~acc_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not acc_df.empty else 0.0
-                                div_val = float(div_df[~div_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not div_df.empty else 0.0
-                                total_base = acc_val + div_val
-                                if total_base > 0:
-                                    acc_gold_ratio = acc_val / total_base
-                                    div_gold_ratio = div_val / total_base
-                                else:
-                                    acc_gold_ratio = 0.5
-                                    div_gold_ratio = 0.5
-                                
-                            mask_acc_gold = user_mask & (data['portfolio_type'] == "Accumulation") & (data['stock_name'] == "EGNL.UK")
-                            mask_div_gold = user_mask & (data['portfolio_type'] == "Dividends") & (data['stock_name'] == "EGNL.UK")
-                            
-                            data.loc[mask_acc_gold, 'current_value'] = new_gold_total * acc_gold_ratio
-                            data.loc[mask_div_gold, 'current_value'] = new_gold_total * div_gold_ratio
-                            updates_made += 1
-                                
-                        # Process Bonds Update
-                        if abs(new_bonds_total - total_bonds) > 0.01:
-                            if total_bonds > 0:
-                                acc_bonds_ratio = acc_bonds / total_bonds
-                                div_bonds_ratio = div_bonds / total_bonds
-                            else:
-                                vault_tickers_set = {"EGNL.UK", "IBTE.UK"}
-                                acc_val = float(acc_df[~acc_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not acc_df.empty else 0.0
-                                div_val = float(div_df[~div_df['stock_name'].isin(vault_tickers_set)]['current_value'].sum()) if not div_df.empty else 0.0
-                                total_base = acc_val + div_val
-                                if total_base > 0:
-                                    acc_bonds_ratio = acc_val / total_base
-                                    div_bonds_ratio = div_val / total_base
-                                else:
-                                    acc_bonds_ratio = 0.5
-                                    div_bonds_ratio = 0.5
-                                
-                            mask_acc_bonds = user_mask & (data['portfolio_type'] == "Accumulation") & (data['stock_name'] == "IBTE.UK")
-                            mask_div_bonds = user_mask & (data['portfolio_type'] == "Dividends") & (data['stock_name'] == "IBTE.UK")
-                            
-                            data.loc[mask_acc_bonds, 'current_value'] = new_bonds_total * acc_bonds_ratio
-                            data.loc[mask_div_bonds, 'current_value'] = new_bonds_total * div_bonds_ratio
-                            updates_made += 1
-                                
-                        if updates_made > 0:
-                            conn.update(worksheet="Portfolios", data=data)
-                            st.cache_data.clear()
-                            st.session_state.master_data = data
-                            st.session_state.omni_messages.append(('success', f"✅ Balances successfully updated ({updates_made} assets)! Changes are synchronized across all sub-accounts."))
-                            st.rerun()
-                        else:
-                            if not st.session_state.omni_messages:
-                                st.session_state.omni_messages.append(('warning', "No updates saved. Values remain the same."))
-                            st.rerun()
-
-                    st.divider()
-                    st.markdown("#### 🧮 Total Vault Allocation")
-
-                    
-                    vault_allocs = st.session_state.get('vault_alloc_by_portfolio', {})
-                    
-                    if vault_allocs:
-                        total_gold_alloc = sum(v.get("EGNL.UK", 0.0) for v in vault_allocs.values())
-                        total_bonds_alloc = sum(v.get("IBTE.UK", 0.0) for v in vault_allocs.values())
-                        
-                        # Breakdown table
-                        breakdown_rows = []
-                        for pname, v in vault_allocs.items():
-                            gold_val = v.get("EGNL.UK", 0.0)
-                            bonds_val = v.get("IBTE.UK", 0.0)
-                            if gold_val > 0 or bonds_val > 0:
-                                breakdown_rows.append({"Portfolio": pname, "→ Gold (€)": gold_val, "→ Bonds (€)": bonds_val})
-                        
-                        if breakdown_rows:
-                            st.dataframe(
-                                pd.DataFrame(breakdown_rows),
-                                use_container_width=True, hide_index=True,
-                                column_config={
-                                    "→ Gold (€)": st.column_config.NumberColumn(format="€%.2f"),
-                                    "→ Bonds (€)": st.column_config.NumberColumn(format="€%.2f"),
-                                }
-                            )
-                        
-                        sum_col1, sum_col2 = st.columns(2)
-                        with sum_col1:
-                            render_kpi_card("🥇 Ouro (EGNL.UK)", f"€{total_gold_alloc:,.2f}")
-                        with sum_col2:
-                            render_kpi_card("📄 Obrigações (IBTE.UK)", f"€{total_bonds_alloc:,.2f}")
-                        
-                        st.markdown("")
-                        if st.button("💾 Registar Investimento no Cofre", use_container_width=True, type="primary"):
-                            with st.spinner("A gravar investimentos no Cofre..."):
-                                try:
-                                    master_data = st.session_state.master_data.copy()
-                                    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    log_rows = []
-                                    
-                                    for pname, v in vault_allocs.items():
-                                        p_type_v = v.get("type", "")
-                                        for ticker, invested_amount in [("EGNL.UK", v.get("EGNL.UK", 0.0)), ("IBTE.UK", v.get("IBTE.UK", 0.0))]:
-                                            if invested_amount <= 0:
-                                                continue
-                                            
-                                            mask = (master_data['username'] == username) & \
-                                                   (master_data['portfolio_type'] == p_type_v) & \
-                                                   (master_data['portfolio_name'] == pname) & \
-                                                   (master_data['stock_name'] == ticker)
-                                            
-                                            if mask.any():
-                                                old_val = float(master_data.loc[mask, 'current_value'].iloc[0])
-                                                new_val = old_val + invested_amount
-                                                master_data.loc[mask, 'current_value'] = new_val
-                                                
-                                                log_rows.append({
-                                                    'timestamp': now_ts, 'username': username,
-                                                    'portfolio_name': pname, 'Stock': ticker,
-                                                    'Current Value': old_val, 'Current %': 0,
-                                                    'Target %': 0, 'Target Value': 0,
-                                                    'Investment': invested_amount,
-                                                    'New Value': new_val, 'New %': 0
-                                                })
-                                    
-                                    # Write updated portfolio values
-                                    conn.update(worksheet="Portfolios", data=master_data)
-                                    st.session_state.master_data = master_data
-                                    
-                                    # Append to InvestmentLog
-                                    if log_rows:
-                                        log_df = pd.DataFrame(log_rows)
-                                        try: existing_history = conn.read(worksheet="InvestmentLog", ttl=0)
-                                        except: existing_history = pd.DataFrame()
-                                        new_history = pd.concat([existing_history, log_df], ignore_index=True) if existing_history is not None and not existing_history.empty else log_df
-                                        conn.update(worksheet="InvestmentLog", data=new_history)
-                                    
-                                    # Clear pending vault allocs
-                                    st.session_state.vault_alloc_by_portfolio = {}
-                                    st.session_state.omni_messages = [('success', f"✅ Cofre atualizado! {len(log_rows)} entrada(s) registadas no histórico.")]
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro ao gravar: {e}")
-                    else:
-                        st.info("No allocations have been calculated for any portfolio yet. Go to each portfolio and calculate the monthly allocation first.")
 
 
         if "📈 Portfolio Details" in tab_map:
@@ -2745,7 +2703,7 @@ elif authentication_status:
                                 asset_data = asset_data.sort_values(by='current_value', ascending=False)
                                 fig_asset = px.pie(asset_data, values='current_value', names='name', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                                 fig_asset.update_layout(chart_theme)
-                                fig_asset.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
+                                fig_asset.update_traces(textposition='outside', texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_asset, use_container_width=True)
                             else:
                                 st.info("No asset data available.")
@@ -2757,7 +2715,7 @@ elif authentication_status:
                             if not sector_data.empty:
                                 fig_sector = px.pie(sector_data, values='current_value', names='sector', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                                 fig_sector.update_layout(chart_theme)
-                                fig_sector.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
+                                fig_sector.update_traces(textposition='outside', texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_sector, use_container_width=True)
                             else:
                                 st.info("No sector data available.")
@@ -2769,7 +2727,7 @@ elif authentication_status:
                             if not ind_data.empty:
                                 fig_ind = px.pie(ind_data, values='current_value', names='industry', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                                 fig_ind.update_layout(chart_theme)
-                                fig_ind.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
+                                fig_ind.update_traces(textposition='outside', texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_ind, use_container_width=True)
                             else:
                                 st.info("No industry data available.")
@@ -2781,7 +2739,7 @@ elif authentication_status:
                             if not country_data.empty:
                                 fig_country = px.pie(country_data, values='current_value', names='country', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                                 fig_country.update_layout(chart_theme)
-                                fig_country.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
+                                fig_country.update_traces(textposition='outside', texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", textfont=dict(size=15), hovertemplate="<b>%{label}</b><br>Value: €%{value:,.2f}<br>Weight: %{percent}<extra></extra>", marker=dict(line=dict(color='rgba(0,0,0,0)', width=0)))
                                 st.plotly_chart(fig_country, use_container_width=True)
                             else:
                                 st.info("No country data available.")
@@ -2919,108 +2877,108 @@ elif authentication_status:
                                             st.warning(f"No data for {filter_ticker} in the selected period.")
                                             st.stop()
                                 
-                                # Calculate Yearly Totals
-                                current_year_str = str(current_year)
-                                prev_year_str = str(current_year - 1)
-                                
-                                total_current_year = my_divs[my_divs['Year'] == current_year_str]['amount'].sum()
-                                total_prev_year = my_divs[my_divs['Year'] == prev_year_str]['amount'].sum()
-                                
-                                # Display Totals Side-by-Side
-                                metric_col1, metric_col2 = st.columns(2)
-                                with metric_col1:
-                                    st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_current_year:,.2f}</span></div>", unsafe_allow_html=True)
-                                with metric_col2:
-                                    st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year-1})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_prev_year:,.2f}</span></div>", unsafe_allow_html=True)
-                                
-                                my_divs['Month'] = my_divs['date'].dt.strftime('%b')
-                                my_divs['MonthNum'] = my_divs['date'].dt.month
-                                
-                                # Aggregated stats
-                                actual_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index()
-                                
-                                # Create a template for all 12 months for BOTH years to ensure a full X-axis
-                                import calendar
-                                all_months = [calendar.month_name[i][:3] for i in range(1, 13)] # ['Jan', 'Feb', ...]
-                                
-                                template_rows = []
-                                for yr in [str(current_year), str(current_year-1)]:
-                                    for i, m in enumerate(all_months):
-                                        template_rows.append({'Year': yr, 'Month': m, 'MonthNum': i+1})
-                                
-                                template_df = pd.DataFrame(template_rows)
-                                
-                                # Merge actual data into template
-                                monthly_stats = pd.merge(template_df, actual_stats, on=['Year', 'Month', 'MonthNum'], how='left').fillna(0.0)
-                                
-                                # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
-                                monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
-                                monthly_stats['amount'] = monthly_stats['amount'].round(2)
-                                
-                                st.markdown("#### 📊 Dividends Received (Yearly Comparison)")
-                                fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount', color_discrete_sequence=CHART_PALETTE)
-                                fig_div.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=10, r=10))
-                                fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=20)
-                                fig_div.update_layout(
-                                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=16)),
-                                    legend_title=dict(font=dict(size=16)),
-                                    font=dict(size=18), 
-                                    xaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
-                                    yaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
-                                    margin=dict(t=10, b=50, l=10, r=10), 
-                                    paper_bgcolor='rgba(0,0,0,0)', 
-                                    plot_bgcolor='rgba(0,0,0,0)'
-                                )
-                                st.plotly_chart(fig_div, use_container_width=True, config={'displayModeBar': False})
-                                with st.expander("Dividend History"):
-                                    history_df = my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False).copy()
-                                    history_df['date'] = history_df['date'].dt.date
+                                    # Calculate Yearly Totals
+                                    current_year_str = str(current_year)
+                                    prev_year_str = str(current_year - 1)
                                     
-                                    # Ensure we have available tickers for the editor
-                                    portfolio_tickers = [s['name'] for s in st.session_state.stocks if s['name'] != "__PLACEHOLDER__"]
-                                    if filter_ticker != "All Data" and filter_ticker not in portfolio_tickers:
-                                        portfolio_tickers.append(filter_ticker)
-                                        
-                                    edited_history = st.data_editor(
-                                        history_df,
-                                        column_config={
-                                            "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
-                                            "ticker": st.column_config.SelectboxColumn("Ticker", options=portfolio_tickers, required=True),
-                                            "amount": st.column_config.NumberColumn("Amount (€)", min_value=0.0, format="€%.2f", required=True),
-                                        },
-                                        use_container_width=True,
-                                        num_rows="dynamic",
-                                        key=f"div_history_editor_{st.session_state.get('editor_key', 0)}"
+                                    total_current_year = my_divs[my_divs['Year'] == current_year_str]['amount'].sum()
+                                    total_prev_year = my_divs[my_divs['Year'] == prev_year_str]['amount'].sum()
+                                    
+                                    # Display Totals Side-by-Side
+                                    metric_col1, metric_col2 = st.columns(2)
+                                    with metric_col1:
+                                        st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_current_year:,.2f}</span></div>", unsafe_allow_html=True)
+                                    with metric_col2:
+                                        st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year-1})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_prev_year:,.2f}</span></div>", unsafe_allow_html=True)
+                                    
+                                    my_divs['Month'] = my_divs['date'].dt.strftime('%b')
+                                    my_divs['MonthNum'] = my_divs['date'].dt.month
+                                    
+                                    # Aggregated stats
+                                    actual_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index()
+                                    
+                                    # Create a template for all 12 months for BOTH years to ensure a full X-axis
+                                    import calendar
+                                    all_months = [calendar.month_name[i][:3] for i in range(1, 13)] # ['Jan', 'Feb', ...]
+                                    
+                                    template_rows = []
+                                    for yr in [str(current_year), str(current_year-1)]:
+                                        for i, m in enumerate(all_months):
+                                            template_rows.append({'Year': yr, 'Month': m, 'MonthNum': i+1})
+                                    
+                                    template_df = pd.DataFrame(template_rows)
+                                    
+                                    # Merge actual data into template
+                                    monthly_stats = pd.merge(template_df, actual_stats, on=['Year', 'Month', 'MonthNum'], how='left').fillna(0.0)
+                                    
+                                    # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
+                                    monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
+                                    monthly_stats['amount'] = monthly_stats['amount'].round(2)
+                                    
+                                    st.markdown("#### 📊 Dividends Received (Yearly Comparison)")
+                                    fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount', color_discrete_sequence=CHART_PALETTE)
+                                    fig_div.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=10, r=10))
+                                    fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=20)
+                                    fig_div.update_layout(
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=16)),
+                                        legend_title=dict(font=dict(size=16)),
+                                        font=dict(size=18), 
+                                        xaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
+                                        yaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
+                                        margin=dict(t=10, b=50, l=10, r=10), 
+                                        paper_bgcolor='rgba(0,0,0,0)', 
+                                        plot_bgcolor='rgba(0,0,0,0)'
                                     )
-                                    
-                                    if st.button("💾 Save History Changes", width="stretch", key="save_div_hist"):
-                                        old_dividends = st.session_state.dividends.drop(index=my_divs.index)
+                                    st.plotly_chart(fig_div, use_container_width=True, config={'displayModeBar': False})
+                                    with st.expander("Dividend History"):
+                                        history_df = my_divs[['date', 'ticker', 'amount']].sort_values('date', ascending=False).copy()
+                                        history_df['date'] = history_df['date'].dt.date
                                         
-                                        new_records = []
-                                        for _, row in edited_history.iterrows():
-                                            if pd.notna(row['date']) and pd.notna(row['ticker']) and pd.notna(row['amount']):
-                                                try:
-                                                    date_str = pd.to_datetime(row['date']).strftime('%Y-%m-%d')
-                                                except:
-                                                    date_str = str(row['date'])
-                                                new_records.append({
-                                                    "date": date_str,
-                                                    "ticker": str(row['ticker']),
-                                                    "amount": float(row['amount']),
-                                                    "portfolio_name": selected_portfolio,
-                                                    "username": username
-                                                })
-                                        
-                                        if new_records:
-                                            new_df = pd.DataFrame(new_records)
-                                            curr_divs = pd.concat([old_dividends, new_df], ignore_index=True)
-                                        else:
-                                            curr_divs = old_dividends.reset_index(drop=True)
+                                        # Ensure we have available tickers for the editor
+                                        portfolio_tickers = [s['name'] for s in st.session_state.stocks if s['name'] != "__PLACEHOLDER__"]
+                                        if filter_ticker != "All Data" and filter_ticker not in portfolio_tickers:
+                                            portfolio_tickers.append(filter_ticker)
                                             
-                                        st.session_state.dividends = curr_divs
-                                        conn.update(worksheet="Dividends", data=curr_divs)
-                                        st.success("History updated!")
-                                        st.rerun()
+                                        edited_history = st.data_editor(
+                                            history_df,
+                                            column_config={
+                                                "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                                                "ticker": st.column_config.SelectboxColumn("Ticker", options=portfolio_tickers, required=True),
+                                                "amount": st.column_config.NumberColumn("Amount (€)", min_value=0.0, format="€%.2f", required=True),
+                                            },
+                                            use_container_width=True,
+                                            num_rows="dynamic",
+                                            key=f"div_history_editor_{st.session_state.get('editor_key', 0)}"
+                                        )
+                                        
+                                        if st.button("💾 Save History Changes", width="stretch", key="save_div_hist"):
+                                            old_dividends = st.session_state.dividends.drop(index=my_divs.index)
+                                            
+                                            new_records = []
+                                            for _, row in edited_history.iterrows():
+                                                if pd.notna(row['date']) and pd.notna(row['ticker']) and pd.notna(row['amount']):
+                                                    try:
+                                                        date_str = pd.to_datetime(row['date']).strftime('%Y-%m-%d')
+                                                    except:
+                                                        date_str = str(row['date'])
+                                                    new_records.append({
+                                                        "date": date_str,
+                                                        "ticker": str(row['ticker']),
+                                                        "amount": float(row['amount']),
+                                                        "portfolio_name": selected_portfolio,
+                                                        "username": username
+                                                    })
+                                            
+                                            if new_records:
+                                                new_df = pd.DataFrame(new_records)
+                                                curr_divs = pd.concat([old_dividends, new_df], ignore_index=True)
+                                            else:
+                                                curr_divs = old_dividends.reset_index(drop=True)
+                                                
+                                            st.session_state.dividends = curr_divs
+                                            conn.update(worksheet="Dividends", data=curr_divs)
+                                            st.success("History updated!")
+                                            st.rerun()
                             else:
                                 st.info("No dividends recorded for this portfolio yet.")
                         else:
