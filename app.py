@@ -1136,6 +1136,8 @@ elif authentication_status:
                 })
                 raw_data['portfolio_name'] = raw_data['portfolio_name'].fillna('Default')
                 raw_data['username'] = raw_data['username'].fillna('unknown') 
+                if 'portfolio_type' in raw_data.columns:
+                    raw_data['portfolio_type'] = raw_data['portfolio_type'].replace('Unified', 'Growth & Dividends')
 
             st.session_state.master_data = raw_data
 
@@ -1145,6 +1147,12 @@ elif authentication_status:
                     div_data = conn.read(worksheet="Dividends", ttl=0)
                     if div_data is None or div_data.empty:
                         div_data = pd.DataFrame(columns=['date', 'ticker', 'amount', 'portfolio_name', 'username'])
+                    else:
+                        # Drop rows where 'date' is empty, NaN, NaT, or invalid
+                        div_data = div_data.dropna(subset=['date'])
+                        div_data = div_data[div_data['date'].astype(str).str.strip() != ""]
+                        div_data = div_data[~div_data['date'].astype(str).str.strip().str.lower().isin(['nat', 'nan', 'none'])]
+                    
                     # Ensure columns exist
                     for col in ['date', 'ticker', 'amount', 'portfolio_name', 'username']:
                         if col not in div_data.columns:
@@ -1194,7 +1202,7 @@ elif authentication_status:
                     return "Bonds"
                 
                 # Split Growth & Dividends (Unified Portfolio) assets
-                if p_type == "Unified" or "growth" in p_name.lower():
+                if p_type == "Growth & Dividends" or "growth" in p_name.lower():
                     if ticker in growth_tickers:
                         return "Growth"
                     if ticker in dividend_tickers:
@@ -1277,7 +1285,7 @@ elif authentication_status:
                     
                     if p_type == "Stocks": return f"📈 {p_name}"
                     elif p_type == "Kids": return f"🧸 {p_name}"
-                    elif p_type == "Unified": return f"🏛️ {p_name}"
+                    elif p_type == "Growth & Dividends": return f"🏛️ {p_name}"
                     return f"📁 {p_name}"
 
                 selected_portfolio = st.selectbox(
@@ -1298,7 +1306,7 @@ elif authentication_status:
             # Create New Portfolio
             with st.expander("➕ Create New Portfolio"):
                 new_portfolio_input = st.text_input("Name", placeholder="e.g., Accumulation", key="new_p_name")
-                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Kids", "Unified"], index=2, key="new_p_type")
+                new_portfolio_type = st.selectbox("Type", options=["Stocks", "Kids", "Growth & Dividends"], index=2, key="new_p_type")
                 if st.button("Create"):
                     if new_portfolio_input and new_portfolio_input not in existing_portfolios:
                         # Create a placeholder row to persist the portfolio name
@@ -1330,8 +1338,8 @@ elif authentication_status:
             if selected_portfolio and selected_portfolio != "🌍 Global Overview":
                 with st.expander(f"⚙️ Portfolio Settings"):
                     # Get current type for default
-                    current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Unified"
-                    type_options = ["Stocks", "Kids", "Unified"]
+                    current_type = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]['portfolio_type'].iloc[0] if not user_all_data[user_all_data['portfolio_name'] == selected_portfolio].empty else "Growth & Dividends"
+                    type_options = ["Stocks", "Kids", "Growth & Dividends"]
                     type_index = type_options.index(current_type) if current_type in type_options else 2
 
                     new_name_input = st.text_input("Rename Portfolio", value=selected_portfolio, placeholder="e.g., accumulation 2026")
@@ -1389,7 +1397,7 @@ elif authentication_status:
     # --- Sync Data Logic (Source of Truth) ---
     # Load current stocks from Master data (Persistent state)
     # This list reflects the state AT THE START of the run.
-    p_type = "Unified"
+    p_type = "Growth & Dividends"
     if selected_portfolio:
         p_rows = user_all_data[user_all_data['portfolio_name'] == selected_portfolio]
         if not p_rows.empty:
@@ -1405,7 +1413,7 @@ elif authentication_status:
     # Initialize session state for stocks ONLY if portfolio changes or it's first run
     if st.session_state.get('last_selected_portfolio') != selected_portfolio:
         current_stocks = []
-        if p_type == "Unified":
+        if p_type == "Growth & Dividends":
             # Map tickers and aggregate duplicate holdings (e.g. from historical merges)
             ticker_map = {
                 "WTEQ.DE": "WTEQ.DE",
@@ -1527,8 +1535,8 @@ elif authentication_status:
                             stock['target_allocation'] = target
                             break
 
-        # 3. Unified Targets and Tolerances Overrides
-        if p_type == "Unified":
+        # 3. Growth & Dividends Targets and Tolerances Overrides
+        if p_type == "Growth & Dividends":
             birth_date_str = st.session_state.get(f"{selected_portfolio}_investor_birth_date", "1992-01-01")
             try:
                 birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d').date()
@@ -1543,7 +1551,7 @@ elif authentication_status:
                 targets_data = calculate_portfolio_targets(age, buffett_index)
                 unified_targets = targets_data["targets"]
             except Exception as e:
-                st.error(f"Error calculating Unified Targets: {e}")
+                st.error(f"Error calculating Growth & Dividends Targets: {e}")
                 unified_targets = {}
             
             for stock in st.session_state.stocks:
@@ -1559,10 +1567,10 @@ elif authentication_status:
     with st.sidebar:
         if selected_portfolio:
             # 2. Configuration Section
-            if p_type in ["Kids", "Unified"]:
+            if p_type in ["Kids", "Growth & Dividends"]:
                 # Default expander behavior: auto-expand for 'Kids' to set birth date, others remain collapsed
                 with st.expander("⚙️ Configuration", expanded=(p_type == "Kids")):
-                    if p_type == "Unified":
+                    if p_type == "Growth & Dividends":
                         investor_birth_key = f"{selected_portfolio}_investor_birth_date"
                         current_investor_birth = st.session_state.get(investor_birth_key, '1992-01-01')
                         
@@ -1640,17 +1648,24 @@ elif authentication_status:
                                 st.rerun()
 
 
-                    # Calculate Previous Month's Dividends (for Dividends Portfolios)
-                    prev_month_divs = 0.0
+                    # Calculate Dividends to include in configuration:
+                    # - If current day is >= 28, use the current month's dividends
+                    # - Otherwise, use the previous month's dividends
+                    applicable_month_divs = 0.0
                     now = datetime.now()
-                    if now.month == 1:
-                        prev_month, prev_year = 12, now.year - 1
-                    else:
-                        prev_month, prev_year = now.month - 1, now.year
                     
-                    prev_month_name = date(prev_year, prev_month, 1).strftime('%B')
+                    if now.day >= 28:
+                        target_month = now.month
+                        target_year = now.year
+                    else:
+                        if now.month == 1:
+                            target_month, target_year = 12, now.year - 1
+                        else:
+                            target_month, target_year = now.month - 1, now.year
+                    
+                    applicable_month_name = date(target_year, target_month, 1).strftime('%B')
 
-                    if p_type == "Unified":
+                    if p_type == "Growth & Dividends":
                         div_df = st.session_state.dividends
                         if not div_df.empty:
                             div_df['date'] = pd.to_datetime(div_df['date'], errors='coerce')
@@ -1658,31 +1673,45 @@ elif authentication_status:
                             
                             mask = (div_df['username'] == username) & \
                                    (div_df['portfolio_name'] == selected_portfolio) & \
-                                   (div_df['date'].dt.month == prev_month) & \
-                                   (div_df['date'].dt.year == prev_year)
+                                   (div_df['date'].dt.month == target_month) & \
+                                   (div_df['date'].dt.year == target_year)
                             
-                            prev_month_divs = div_df[mask]['amount'].sum()
+                            applicable_month_divs = div_df[mask]['amount'].sum()
 
-                    current_month = datetime.now().month
+                    # Determine investment month and year (from day 28 onwards, prepare next month's investment)
+                    if now.day >= 28:
+                        if now.month == 12:
+                            investment_month, investment_year = 1, now.year + 1
+                        else:
+                            investment_month, investment_year = now.month + 1, now.year
+                    else:
+                        investment_month, investment_year = now.month, now.year
+                    
+                    investment_month_name = date(investment_year, investment_month, 1).strftime('%B')
+
                     if p_type == "Kids":
-                        base_investment = 100.0 if current_month in [6, 12] else 50.0
-                    elif p_type == "Unified":
-                        base_investment = 1000.0 if current_month in [6, 12] else 500.0
+                        base_investment = 100.0 if investment_month in [6, 12] else 50.0
+                    elif p_type == "Growth & Dividends":
+                        # Exceptional override for next month (June 2026)
+                        if investment_month == 6 and investment_year == 2026:
+                            base_investment = 906.19
+                        else:
+                            base_investment = 1000.0 if investment_month in [6, 12] else 500.0
                     else:
                         base_investment = 500.0 # Default fallback
                         
-                    st.markdown(f"**💳 Base Investment:** €{base_investment:,.2f}")
+                    st.markdown(f"**💳 Base Investment ({investment_month_name}):** €{base_investment:,.2f}")
 
-                    if p_type == "Unified":
-                        monthly_investment = base_investment + prev_month_divs
+                    if p_type == "Growth & Dividends":
+                        monthly_investment = base_investment + applicable_month_divs
                         
                         # Show Breakdown in Sidebar
-                        st.markdown(f"**📅 Dividends ({prev_month_name}):** €{prev_month_divs:,.2f}")
+                        st.markdown(f"**📅 Dividends ({applicable_month_name}):** €{applicable_month_divs:,.2f}")
                         st.markdown(f"**💰 Total Monthly Investment:** :green[€{monthly_investment:,.2f}]")
                     else:
                         monthly_investment = base_investment
                     
-                    if p_type == "Unified":
+                    if p_type == "Growth & Dividends":
                         st.markdown("### Market Indicators")
                         buffett_index_key = f"{selected_portfolio}_buffett_index"
                         buffett_index = st.number_input(
@@ -1821,7 +1850,7 @@ elif authentication_status:
         tab_list = []
         if p_type == "Stocks":
             tab_list = ["📈 Portfolio Details", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
-        elif p_type == "Unified":
+        elif p_type == "Growth & Dividends":
             tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
         else: # Kids
             tab_list = ["📊 Manage Portfolio", "🪙 Uninvested Cash"]
@@ -1876,12 +1905,12 @@ elif authentication_status:
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn(
                                 "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.2f%%", 
-                                disabled=(p_type in ["Kids", "Unified"])
+                                disabled=(p_type in ["Kids", "Growth & Dividends"])
                             ),
                             "current_price": st.column_config.NumberColumn("Price (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "tolerance": st.column_config.NumberColumn(
                                 "Tolerance %", min_value=0.0, max_value=20.0, step=0.1, format="%.1f%%",
-                                disabled=(p_type in ["Unified"])
+                                disabled=(p_type in ["Growth & Dividends"])
                             ),
                             "expense_ratio": st.column_config.NumberColumn("TER %", min_value=0.0, max_value=5.0, step=0.01, format="%.2f%%")
                         }
@@ -2070,7 +2099,7 @@ elif authentication_status:
                     with st.container(border=True):
                         st.subheader("🎯 Action Center")
                         if st.button("🧮 Calculate Allocation", width="stretch"):
-                            if p_type == "Unified":
+                            if p_type == "Growth & Dividends":
                                 import copy
                                 live_stocks = copy.deepcopy(st.session_state.stocks)
                                 current_monthly_base = float(monthly_investment)
@@ -2138,7 +2167,7 @@ elif authentication_status:
                                     buys_data["portfolio_targets"] = targets
                                     
                                 except Exception as e:
-                                    st.error(f"Error calculating Unified buys: {e}")
+                                    st.error(f"Error calculating Growth & Dividends buys: {e}")
                                     st.stop()
                                     
                                 portfolio_targets = buys_data["portfolio_targets"]
@@ -3019,15 +3048,23 @@ elif authentication_status:
                         if add_clicked:
                             if div_ticker and div_amount > 0:
                                 new_div = {
-                                    "date": str(div_date),
+                                    "date": f"{div_date} 00:00:00",
                                     "ticker": div_ticker,
                                     "amount": div_amount,
                                     "portfolio_name": selected_portfolio,
                                     "username": username
                                 }
+                                # Fetch freshest data from Google Sheets first to avoid overwriting edits from other sessions
+                                fresh_divs = conn.read(worksheet="Dividends", ttl=0)
+                                if fresh_divs is None or fresh_divs.empty:
+                                    fresh_divs = pd.DataFrame(columns=['date', 'ticker', 'amount', 'portfolio_name', 'username'])
+                                
                                 new_row_df = pd.DataFrame([new_div])
-                                st.session_state.dividends = pd.concat([st.session_state.dividends, new_row_df], ignore_index=True)
-                                conn.update(worksheet="Dividends", data=st.session_state.dividends)
+                                updated_divs = pd.concat([fresh_divs, new_row_df], ignore_index=True)
+                                
+                                st.session_state.dividends = updated_divs
+                                conn.update(worksheet="Dividends", data=updated_divs)
+                                conn.reset() # Invalidate GSheetsConnection cache to ensure live data load
                                 st.success("Dividend Recorded!")
                                 st.rerun()
                             else:
@@ -3076,25 +3113,28 @@ elif authentication_status:
                                     with metric_col2:
                                         st.markdown(f"<div style='margin-bottom: 15px;'><span style='font-size: 1.1rem; font-weight: 600; color: #E5E7EB;'>💰 Total Dividends ({current_year-1})</span><br><span style='font-size: 2rem; font-weight: 700;'>€{total_prev_year:,.2f}</span></div>", unsafe_allow_html=True)
                                     
-                                    my_divs['Month'] = my_divs['date'].dt.strftime('%b')
                                     my_divs['MonthNum'] = my_divs['date'].dt.month
                                     
-                                    # Aggregated stats
-                                    actual_stats = my_divs.groupby(['Year', 'Month', 'MonthNum'])['amount'].sum().reset_index()
+                                    # Aggregated stats (grouped by Year and MonthNum to be 100% locale-independent)
+                                    actual_stats = my_divs.groupby(['Year', 'MonthNum'])['amount'].sum().reset_index()
                                     
                                     # Create a template for all 12 months for BOTH years to ensure a full X-axis
-                                    import calendar
-                                    all_months = [calendar.month_name[i][:3] for i in range(1, 13)] # ['Jan', 'Feb', ...]
-                                    
                                     template_rows = []
                                     for yr in [str(current_year), str(current_year-1)]:
-                                        for i, m in enumerate(all_months):
-                                            template_rows.append({'Year': yr, 'Month': m, 'MonthNum': i+1})
+                                        for m_num in range(1, 13):
+                                            template_rows.append({'Year': yr, 'MonthNum': m_num})
                                     
                                     template_df = pd.DataFrame(template_rows)
                                     
                                     # Merge actual data into template
-                                    monthly_stats = pd.merge(template_df, actual_stats, on=['Year', 'Month', 'MonthNum'], how='left').fillna(0.0)
+                                    monthly_stats = pd.merge(template_df, actual_stats, on=['Year', 'MonthNum'], how='left').fillna(0.0)
+                                    
+                                    # Map MonthNum to English 3-letter month abbreviations for plotting
+                                    month_map = {
+                                        1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
+                                        7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
+                                    }
+                                    monthly_stats['Month'] = monthly_stats['MonthNum'].map(month_map)
                                     
                                     # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
                                     monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
@@ -3129,7 +3169,7 @@ elif authentication_status:
                                         edited_history = st.data_editor(
                                             history_df,
                                             column_config={
-                                                "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+                                                "date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", required=True),
                                                 "ticker": st.column_config.SelectboxColumn("Ticker", options=portfolio_tickers, required=True),
                                                 "amount": st.column_config.NumberColumn("Amount (€)", min_value=0.0, format="€%.2f", required=True),
                                             },
@@ -3139,31 +3179,40 @@ elif authentication_status:
                                         )
                                         
                                         if st.button("💾 Save History Changes", width="stretch", key="save_div_hist"):
-                                            old_dividends = st.session_state.dividends.drop(index=my_divs.index)
+                                            # Fetch freshest data from Google Sheets first to avoid overwriting edits from other sessions
+                                            fresh_divs = conn.read(worksheet="Dividends", ttl=0)
+                                            if fresh_divs is None or fresh_divs.empty:
+                                                fresh_divs = pd.DataFrame(columns=['date', 'ticker', 'amount', 'portfolio_name', 'username'])
+                                            
+                                            # Drop old records for ONLY this specific user and portfolio to keep other edits intact
+                                            other_dividends = fresh_divs[~((fresh_divs['username'] == username) & (fresh_divs['portfolio_name'] == selected_portfolio))]
                                             
                                             new_records = []
                                             for _, row in edited_history.iterrows():
-                                                if pd.notna(row['date']) and pd.notna(row['ticker']) and pd.notna(row['amount']):
-                                                    try:
-                                                        date_str = pd.to_datetime(row['date']).strftime('%Y-%m-%d')
-                                                    except:
-                                                        date_str = str(row['date'])
-                                                    new_records.append({
-                                                        "date": date_str,
-                                                        "ticker": str(row['ticker']),
-                                                        "amount": float(row['amount']),
-                                                        "portfolio_name": selected_portfolio,
-                                                        "username": username
-                                                    })
+                                                row_date = row.get('date')
+                                                if row_date is not None and pd.notna(row_date) and str(row_date).strip() != "" and str(row_date).strip().lower() != 'nat' and str(row_date).strip().lower() != 'nan':
+                                                    if pd.notna(row['ticker']) and pd.notna(row['amount']):
+                                                        try:
+                                                            date_str = pd.to_datetime(row_date).strftime('%Y-%m-%d 00:00:00')
+                                                        except:
+                                                            date_str = f"{row_date} 00:00:00"
+                                                        new_records.append({
+                                                            "date": date_str,
+                                                            "ticker": str(row['ticker']),
+                                                            "amount": float(row['amount']),
+                                                            "portfolio_name": selected_portfolio,
+                                                            "username": username
+                                                        })
                                             
                                             if new_records:
                                                 new_df = pd.DataFrame(new_records)
-                                                curr_divs = pd.concat([old_dividends, new_df], ignore_index=True)
+                                                curr_divs = pd.concat([other_dividends, new_df], ignore_index=True)
                                             else:
-                                                curr_divs = old_dividends.reset_index(drop=True)
+                                                curr_divs = other_dividends.reset_index(drop=True)
                                                 
                                             st.session_state.dividends = curr_divs
                                             conn.update(worksheet="Dividends", data=curr_divs)
+                                            conn.reset() # Invalidate GSheetsConnection cache to ensure live data load
                                             st.success("History updated!")
                                             st.rerun()
                             else:
