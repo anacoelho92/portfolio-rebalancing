@@ -1004,6 +1004,7 @@ elif authentication_status:
     # st.divider()
 
     # Initialize GSheets connection
+    # pyrefly: ignore [missing-import]
     from streamlit_gsheets import GSheetsConnection
     conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -2256,6 +2257,7 @@ elif authentication_status:
                                             final_investments[item['name']] = item['invest']
      
                                     # --- STEP 3: Post-Processing Rule Enforcement ---
+                                    is_dividends_p = "dividend" in selected_portfolio.lower()
                                     if is_dividends_p:
                                         # 1. Enforce Integer/Floor and MinBuy of 5€
                                         total_after_round = 0.0
