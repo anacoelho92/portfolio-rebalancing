@@ -276,12 +276,71 @@ TOLERANCE_PP = {
 }
 
 
+def calculate_egln_prab_transition_plan(
+    portfolio_value: float,
+    monthly_contribution: float,
+    current_egln_value: float = 0.0,
+    current_prab_value: float = 0.0,
+    months: int = 4,
+    egln_target_pct: float = 3.0,
+    prab_target_pct: float = 2.7,
+    min_order_size: float = 5.0,
+):
+    plan = []
+
+    egln_value = current_egln_value
+    prab_value = current_prab_value
+    current_portfolio_value = portfolio_value
+
+    for month in range(1, months + 1):
+        portfolio_after_contribution = current_portfolio_value + monthly_contribution
+
+        egln_target_value = portfolio_after_contribution * egln_target_pct / 100.0
+        prab_target_value = portfolio_after_contribution * prab_target_pct / 100.0
+
+        months_left = months - month + 1
+
+        egln_gap = max(0.0, egln_target_value - egln_value)
+        prab_gap = max(0.0, prab_target_value - prab_value)
+
+        egln_buy = egln_gap / months_left
+        prab_buy = prab_gap / months_left
+
+        if egln_buy < min_order_size:
+            egln_buy = 0.0
+
+        if prab_buy < min_order_size:
+            prab_buy = 0.0
+
+        total_defensive_buy = egln_buy + prab_buy
+        remaining_for_normal_strategy = monthly_contribution - total_defensive_buy
+
+        egln_value += egln_buy
+        prab_value += prab_buy
+        current_portfolio_value = portfolio_after_contribution
+
+        plan.append({
+            "month": month,
+            "portfolio_after_contribution": round(portfolio_after_contribution, 2),
+            "egln_buy": round(egln_buy, 2),
+            "prab_buy": round(prab_buy, 2),
+            "remaining_for_normal_strategy": round(remaining_for_normal_strategy, 2),
+            "egln_value_after_buy": round(egln_value, 2),
+            "prab_value_after_buy": round(prab_value, 2),
+            "egln_target_value": round(egln_target_value, 2),
+            "prab_target_value": round(prab_target_value, 2),
+        })
+
+    return plan
+
+
 def calculate_monthly_buys(
     age: int,
     buffett_index: float,
     current_values: Dict[str, float],
     monthly_contribution: float,
     min_order_size: float = 5.0,
+    exclude_defensive: bool = False,
 ) -> Dict[str, Any]:
     """
     Calculates how to allocate the monthly contribution.
@@ -295,6 +354,16 @@ def calculate_monthly_buys(
 
     portfolio_data = calculate_portfolio_targets(age, buffett_index)
     targets = portfolio_data["targets"]
+
+    if exclude_defensive:
+        targets = targets.copy()
+        def_sum = targets.get("EGLN.UK", 0.0) + targets.get("PRAB.DE", 0.0)
+        remaining_sum = 100.0 - def_sum
+        for asset in list(targets.keys()):
+            if asset in ("EGLN.UK", "PRAB.DE"):
+                targets[asset] = 0.0
+            elif remaining_sum > 0:
+                targets[asset] = (targets[asset] / remaining_sum) * 100.0
 
     all_assets = list(targets.keys())
 
@@ -882,6 +951,18 @@ st.markdown("""
     [data-testid="stHeader"] div[data-testid="stStatusWidget"] {
         display: none !important;
     }
+
+    /* Profit color overrides with extreme specificity placed at the very bottom */
+    [data-testid="stAppViewContainer"] div.kpi-card span.profit-green,
+    [data-testid="stAppViewContainer"] span.profit-green {
+        color: #10B981 !important;
+        font-weight: 800 !important;
+    }
+    [data-testid="stAppViewContainer"] div.kpi-card span.profit-red,
+    [data-testid="stAppViewContainer"] span.profit-red {
+        color: #EF4444 !important;
+        font-weight: 800 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1092,13 +1173,38 @@ elif authentication_status:
         if not user_all_data.empty:
             valid_data = user_all_data[user_all_data['stock_name'] != '__PLACEHOLDER__'].copy()
             
-            # Separate Gold and Bonds into their own distinct slices
-            gold_mask = valid_data['stock_name'] == "EGNL.UK"
-            bonds_mask = valid_data['stock_name'] == "IBTE.UK"
-            valid_data.loc[gold_mask, 'portfolio_name'] = "Gold"
-            valid_data.loc[bonds_mask, 'portfolio_name'] = "Bonds"
+            # Exclude Kids portfolios from global overview and sidebar total values
+            global_valid_data = valid_data[valid_data['portfolio_type'].str.strip().str.upper() != "KIDS"].copy()
             
-            merged_global = valid_data.groupby('portfolio_name')['current_value'].sum().reset_index()
+            # Separate Gold, Bonds, Growth, and Dividends based on user asset categories
+            growth_tickers = {"SPYL.DE", "IXUA.DE", "VFEA.DE"}
+            dividend_tickers = {"WTEQ.DE", "VDIV.DE", "EDP.PT", "JMT.PT"}
+            gold_tickers = {"EGLN.UK", "EGNL.UK"}
+            bond_tickers = {"PRAB.DE", "IBTE.UK"}
+
+            def assign_global_label(row):
+                ticker = str(row['stock_name']).upper().strip()
+                p_type = str(row['portfolio_type']).strip()
+                p_name = str(row['portfolio_name']).strip()
+                
+                # Gold and Bonds are separated globally across all portfolios
+                if ticker in gold_tickers:
+                    return "Gold"
+                if ticker in bond_tickers:
+                    return "Bonds"
+                
+                # Split Growth & Dividends (Unified Portfolio) assets
+                if p_type == "Unified" or "growth" in p_name.lower():
+                    if ticker in growth_tickers:
+                        return "Growth"
+                    if ticker in dividend_tickers:
+                        return "Dividends"
+                        
+                return row['portfolio_name']
+
+            global_valid_data['portfolio_name'] = global_valid_data.apply(assign_global_label, axis=1)
+            
+            merged_global = global_valid_data.groupby('portfolio_name')['current_value'].sum().reset_index()
             merged_global.rename(columns={'current_value': 'total_value'}, inplace=True)
             merged_global = merged_global[merged_global['total_value'] > 0]
             
@@ -1557,18 +1663,16 @@ elif authentication_status:
                             
                             prev_month_divs = div_df[mask]['amount'].sum()
 
-                    monthly_investment_key = f"{selected_portfolio}_monthly_invest"
-                    
-                    base_investment = st.number_input(
-                        "Monthly Investment Amount (€)",
-                        min_value=0.0,
-                        value=st.session_state.get(monthly_investment_key, 1000.0),
-                        key=monthly_investment_key,
-                        step=100.0,
-                        help="Base amount you want to invest this month",
-                        on_change=clear_recommendations
-                    )
-                    
+                    current_month = datetime.now().month
+                    if p_type == "Kids":
+                        base_investment = 100.0 if current_month in [6, 12] else 50.0
+                    elif p_type == "Unified":
+                        base_investment = 1000.0 if current_month in [6, 12] else 500.0
+                    else:
+                        base_investment = 500.0 # Default fallback
+                        
+                    st.markdown(f"**💳 Base Investment:** €{base_investment:,.2f}")
+
                     if p_type == "Unified":
                         monthly_investment = base_investment + prev_month_divs
                         
@@ -1599,92 +1703,7 @@ elif authentication_status:
                 use_market_indicators = False
                 buffett_index = 195.0
             
-            # 3. Add Stock Section
-            with st.expander("🛠️ Stock Management", expanded=False):
-                # Using centralized p_type defined earlier
 
-                st.markdown("➕ **Add New Stock**")
-                new_name = st.text_input("Ticker")
-                value_label = "Value (€)" if p_type == "Stocks" else "Current Value (€)"
-                new_value = st.number_input(value_label, min_value=0.0, value=0.0, key="new_value")
-                
-                # Initialize defaults for conditional fields
-                new_target = 0.0
-                new_tolerance = 2.0
-                new_ter = 0.0
-                new_full_name = ""
-                new_sector = ""
-                new_industry = ""
-                new_country = ""
-                new_currency = ""
-                new_qty = 0.0
-                new_avg_price = 0.0
-                new_div_yield = 0.0
-
-                if p_type == "Stocks":
-                    new_qty = st.number_input("Quantity", min_value=0.0, value=0.0, step=0.01, key="new_qty")
-                    new_avg_price = st.number_input("Average Price", min_value=0.0, value=0.0, step=0.01, key="new_avg")
-                    new_div_yield = st.number_input("Div. Yield (%)", min_value=0.0, value=0.0, step=0.01, key="new_dy")
-                    
-                    new_full_name = st.text_input("Company Name", key="new_full_name")
-                    m_col1, m_col2 = st.columns(2)
-                    with m_col1:
-                        new_sector = st.text_input("Sector", key="new_sector")
-                        new_industry = st.text_input("Industry", key="new_industry")
-                    with m_col2:
-                        new_country = st.text_input("Country", key="new_country")
-                        new_currency = st.text_input("Currency", key="new_currency")
-                else:
-                    new_target = st.number_input("Target Allocation (%)", min_value=0.0, max_value=100.0, value=0.0, key="new_target")
-                    new_tolerance = st.number_input("Rebalancing Tolerance (%)", min_value=0.0, max_value=20.0, value=2.0, key="new_tolerance", help="Don't rebalance if drift is less/more than this %")
-                    new_ter = st.number_input("Expense Ratio (TER %)", min_value=0.0, max_value=5.0, value=0.0, step=0.01, key="new_ter")
-                
-                if st.button("Add Stock"):
-                    if new_name:
-                        # Get current portfolio-level config
-                        p_invest = st.session_state.get(f"{selected_portfolio}_monthly_invest", 1000.0)
-                        p_use_ind = st.session_state.get(f"{selected_portfolio}_use_indicators", False)
-                        p_buffett = st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0)
-
-                        new_row = pd.DataFrame([{
-                            "username": username,
-                            "stock_name": new_name,
-                            "current_value": new_value,
-                            "target_allocation": new_target,
-                            "tolerance": new_tolerance,
-                            "expense_ratio": new_ter,
-                            "portfolio_name": selected_portfolio,
-                            "portfolio_monthly_invest": p_invest,
-                            "portfolio_use_indicators": p_use_ind,
-                            "portfolio_buffett_index": p_buffett,
-                            "stock_full_name": new_full_name,
-                            "sector": new_sector,
-                            "industry": new_industry,
-                            "country": new_country,
-                            "currency": new_currency,
-                            "quantity": new_qty,
-                            "average_price": new_avg_price,
-                            "dividend_yield": new_div_yield,
-                            "portfolio_type": p_type,
-                            "portfolio_birth_date": st.session_state.get(f"{selected_portfolio}_birth_date", "")
-                        }])
-                        
-                        mask_placeholder = (data['username'] == username) & \
-                                         (data['portfolio_name'] == selected_portfolio) & \
-                                         (data['stock_name'] == "__PLACEHOLDER__")
-                        
-                        if mask_placeholder.any():
-                            data = data[~mask_placeholder]
-
-                        updated_data = pd.concat([data, new_row], ignore_index=True)
-                        st.session_state.master_data = updated_data
-                        # Deferred: conn.update(worksheet="Portfolios", data=updated_data)
-                        st.session_state.has_unsaved_changes = True
-                        reset_portfolio_state()
-                        st.success(f"Added {new_name}")
-                        st.rerun()
-                    else:
-                        st.error("Please enter a stock name")
         else:
             monthly_investment = 1000.0 # Default fallback for later logic
 
@@ -1750,15 +1769,47 @@ elif authentication_status:
             # Calculate Unique Sectors
             unique_sectors = set(s.get('sector', '') for s in live_stocks if s.get('sector', ''))
             num_sectors = len(unique_sectors)
+            # Calculate total volume (sum of all quantities)
+            total_volume = sum(float(s.get('quantity', 0.0) or 0.0) for s in live_stocks)
+            # Total Invested Value
+            total_invested = sum(float(s.get('current_price', 0.0) or 0.0) for s in live_stocks)
+            # Profit / Loss
+            profit = total_current - total_invested
+            profit_pct = (profit / total_invested * 100.0) if total_invested > 0 else 0.0
+            profit_prefix = "+" if profit >= 0 else ""
+            profit_class = "profit-green" if profit >= 0 else "profit-red"
 
-            kpi_cols = st.columns(3)
-            with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
-            with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
-            with kpi_cols[2]: render_kpi_card("Sectors", f"{num_sectors}")
+            # Weighted Dividend Yield (Market Value weighted)
+            total_market_val = sum(float(s.get('current_value', 0.0) or 0.0) for s in live_stocks)
+            weighted_div_yield_sum = sum(float(s.get('current_value', 0.0) or 0.0) * float(s.get('dividend_yield', 0.0) or 0.0) for s in live_stocks)
+            portfolio_div_yield = (weighted_div_yield_sum / total_market_val) if total_market_val > 0 else 0.0
+
+            # Weighted Yield on Cost (Invested Value weighted)
+            portfolio_yoc = (weighted_div_yield_sum / total_invested) if total_invested > 0 else 0.0
+
+            # Render in two beautifully structured rows (3 columns per row)
+            # Row 1: Financial Performance & Volumes
+            kpi_row1 = st.columns(3)
+            with kpi_row1[0]: 
+                render_kpi_card("Total Market Value", f"€{total_current:,.2f}")
+            with kpi_row1[1]: 
+                render_kpi_card("Profit", f'<span class="{profit_class}">€{profit_prefix}{profit:,.2f} ({profit_prefix}{profit_pct:+.2f}%)</span>')
+            with kpi_row1[2]: 
+                render_kpi_card("Volumes Count", f"{total_volume:,.0f}")
+
+            # Row 2: Portfolio Characteristics & Yields
+            kpi_row2 = st.columns(3)
+            with kpi_row2[0]: 
+                render_kpi_card("Stocks by Sectors", f"{num_stocks} / {num_sectors}")
+            with kpi_row2[1]: 
+                render_kpi_card("Dividend Yield", f"{portfolio_div_yield:.2f}%")
+            with kpi_row2[2]: 
+                render_kpi_card("Yield on Cost", f"{portfolio_yoc:.2f}%")
         else:
             kpi_cols = st.columns(4)
+            count_label = "ETFs Count" if p_type == "Kids" else "Stocks / ETFs Count"
             with kpi_cols[0]: render_kpi_card("Total Value", f"€{total_current:,.2f}")
-            with kpi_cols[1]: render_kpi_card("Stocks Count", f"{num_stocks}")
+            with kpi_cols[1]: render_kpi_card(count_label, f"{num_stocks}")
             with kpi_cols[2]: render_kpi_card("Weighted TER", f"{weighted_ter:.2f}%")
             with kpi_cols[3]: render_kpi_card("Monthly Budget", f"€{monthly_investment:,.2f}")
         
@@ -1769,7 +1820,7 @@ elif authentication_status:
         
         tab_list = []
         if p_type == "Stocks":
-            tab_list = ["📈 Portfolio Details", "🪙 Uninvested Cash"]
+            tab_list = ["📈 Portfolio Details", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
         elif p_type == "Unified":
             tab_list = ["📊 Manage Portfolio", "💰 Dividend Tracker", "🪙 Uninvested Cash"]
         else: # Kids
@@ -1813,19 +1864,15 @@ elif authentication_status:
                             # Custom order logic
                             custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
                             current_stocks_df['order_idx'] = current_stocks_df['name'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
-                            current_stocks_df = current_stocks_df.sort_values(by='order_idx').drop(columns=['order_idx'])
+                            current_stocks_df = current_stocks_df.sort_values(by='order_idx').drop(columns=['order_idx']).reset_index(drop=True)
+                            current_stocks_df.set_index("name", inplace=True)
                         else:
                             current_stocks_df = pd.DataFrame(columns=["name", "current_value", "target_allocation", "tolerance", "expense_ratio", "current_price"])
-                        
-                        # Simple row-level styling
-                        def style_rows_mgmt(row):
-                            return ['' for _ in row.index]
-                        
-                        styled_mgmt_df = current_stocks_df.style.apply(style_rows_mgmt, axis=1)
+                            current_stocks_df.set_index("name", inplace=True)
                         
                         # Configuration for Data Editor
                         column_config = {
-                            "name": st.column_config.TextColumn("Ticker", required=True, disabled=True),
+                            "_index": st.column_config.TextColumn("Ticker", required=True, disabled=True),
                             "current_value": st.column_config.NumberColumn("Value (€)", min_value=0.0, step=0.01, format="%.2f"),
                             "target_allocation": st.column_config.NumberColumn(
                                 "Target %", min_value=0.0, max_value=100.0, step=0.01, format="%.2f%%", 
@@ -1840,11 +1887,10 @@ elif authentication_status:
                         }
                         
                         edited_df = st.data_editor(
-                            styled_mgmt_df,
+                            current_stocks_df,
                             column_config=column_config,
                             num_rows="dynamic",
                             use_container_width=True,
-                            hide_index=True,
                             key=f"portfolio_editor_{st.session_state.editor_key}",
                             on_change=clear_recommendations
                         )
@@ -1853,8 +1899,8 @@ elif authentication_status:
                         # This ensures charts and calculations use the latest typed values even before saving
                         if not edited_df.equals(current_stocks_df):
                             # DETECT DELETIONS
-                            updated_stocks = edited_df.to_dict('records')
-                            old_stocks = current_stocks_df.to_dict('records')
+                            updated_stocks = edited_df.reset_index().to_dict('records')
+                            old_stocks = current_stocks_df.reset_index().to_dict('records')
         
                             if len(updated_stocks) < len(old_stocks):
                                 # Row(s) were deleted
@@ -1959,7 +2005,7 @@ elif authentication_status:
                             
                             # Then create new rows from edited_df
                             new_rows = []
-                            for _, row in edited_df.iterrows():
+                            for _, row in edited_df.reset_index().iterrows():
                                 if row['name'] and row['name'] != "__PLACEHOLDER__":
                                      new_rows.append({
                                         "username": username,
@@ -2044,15 +2090,53 @@ elif authentication_status:
                                 # Extract Buffett Index
                                 buffett_index = float(st.session_state.get(f"{selected_portfolio}_buffett_index", 195.0))
                                 
-                                # Execute monthly buys logic
+                                # Execute monthly buys logic with defensive transition plan
                                 try:
+                                    # Get dynamic target weights for EGLN.UK and PRAB.DE
+                                    targets_data = calculate_portfolio_targets(age, buffett_index)
+                                    targets = targets_data["targets"]
+                                    egln_tgt = targets.get("EGLN.UK", 3.0)
+                                    prab_tgt = targets.get("PRAB.DE", 2.7)
+                                    
+                                    total_port_val = sum(current_values.get(asset, 0.0) for asset in current_values)
+                                    
+                                    transition_plan = calculate_egln_prab_transition_plan(
+                                        portfolio_value=total_port_val,
+                                        monthly_contribution=current_monthly_base,
+                                        current_egln_value=current_values.get("EGLN.UK", 0.0),
+                                        current_prab_value=current_values.get("PRAB.DE", 0.0),
+                                        months=4,
+                                        egln_target_pct=egln_tgt,
+                                        prab_target_pct=prab_tgt,
+                                        min_order_size=5.0
+                                    )
+                                    
+                                    # Extract first month's purchases
+                                    current_month_plan = transition_plan[0]
+                                    egln_buy = current_month_plan["egln_buy"]
+                                    prab_buy = current_month_plan["prab_buy"]
+                                    remaining_contrib = current_month_plan["remaining_for_normal_strategy"]
+                                    
+                                    # Allocate the rest of the monthly contribution using normal rebalancing on remaining assets
                                     buys_data = calculate_monthly_buys(
                                         age=age,
                                         buffett_index=buffett_index,
                                         current_values=current_values,
-                                        monthly_contribution=current_monthly_base,
-                                        min_order_size=5.0
+                                        monthly_contribution=remaining_contrib,
+                                        min_order_size=5.0,
+                                        exclude_defensive=True
                                     )
+                                    
+                                    # Integrate transition buys back into the final results
+                                    buys_data["buys"]["EGLN.UK"] = egln_buy
+                                    buys_data["buys"]["PRAB.DE"] = prab_buy
+                                    
+                                    buys_data["raw_buys"]["EGLN.UK"] = egln_buy
+                                    buys_data["raw_buys"]["PRAB.DE"] = prab_buy
+                                    
+                                    buys_data["portfolio_value_after"] = round(total_port_val + current_monthly_base, 2)
+                                    buys_data["portfolio_targets"] = targets
+                                    
                                 except Exception as e:
                                     st.error(f"Error calculating Unified buys: {e}")
                                     st.stop()
@@ -2428,17 +2512,25 @@ elif authentication_status:
                         st.subheader("📉 Allocation Visuals")
                         df_plot = df[~df['Stock'].isin(["EGLN.UK", "PRAB.DE"])].sort_values('Stock')
                         
-                        st.markdown("<h4 style='text-align: center; color: #1f2937; margin-bottom: 0px;'>After Investment</h4>", unsafe_allow_html=True)
                         fig_after = px.pie(df_plot, values='New Value', names='Stock', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                         fig_after.update_layout(
+                            title=dict(
+                                text="<b>After Investment</b>",
+                                x=0.5,
+                                y=0.96,
+                                xanchor='center',
+                                yanchor='top',
+                                font=dict(size=18, color='white')
+                            ),
                             paper_bgcolor='rgba(0,0,0,0)',
                             plot_bgcolor='rgba(0,0,0,0)',
-                            margin=dict(t=60, b=60, l=40, r=40),
+                            margin=dict(t=110, b=50, l=40, r=40),
                             showlegend=False,
-                            height=450
+                            height=480
                         )
                         fig_after.update_traces(
                             sort=False,
+                            domain=dict(y=[0.0, 0.85]),
                             textposition='outside',
                             texttemplate="<b>%{label}</b><br>%{value:,.2f} € | %{percent}", 
                             textfont=dict(size=14),
@@ -2460,16 +2552,8 @@ elif authentication_status:
                     st.subheader("📈 Detailed Portfolio Information")
                     
                     # Prepare data for Detailed Editor
-                    details_df = pd.DataFrame(st.session_state.stocks)
-                    if details_df.empty:
-                        details_df = pd.DataFrame(columns=["name", "full_name", "sector", "industry", "country", "currency", "current_value", "quantity", "average_price", "dividend_yield"])
+                    df_key = f"{selected_portfolio}_detailed_df"
                     
-                    # Currency Symbol Mapping
-                    currency_symbols = {"EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥", "CHF": "Fr", "CAD": "$", "AUD": "$", "DKK": "kr."}
-                    primary_currency = details_df['currency'].iloc[0] if not details_df.empty and 'currency' in details_df.columns and details_df['currency'].iloc[0] else "EUR"
-                    sym = currency_symbols.get(primary_currency, "€")
-                    
-                    # Reorder and rename for display
                     display_cols = {
                         "name": "Ticker",
                         "full_name": "Name",
@@ -2477,34 +2561,134 @@ elif authentication_status:
                         "industry": "Industry",
                         "country": "Country",
                         "currency": "Currency",
-                        "current_value": "Value",
+                        "current_value": "Market Value",
+                        "current_price": "Invested Value (€)",
                         "quantity": "Quantity",
                         "average_price": "Avg. Price",
                         "dividend_yield": "Div. Yield (%)"
                     }
+
+                    # Calculate total dividends received per ticker
+                    df_divs = st.session_state.dividends
+                    dividend_map = {}
+                    if not df_divs.empty:
+                        df_divs['amount'] = pd.to_numeric(df_divs['amount'], errors='coerce').fillna(0.0)
+                        mask = (df_divs['username'] == username) & (df_divs['portfolio_name'] == selected_portfolio)
+                        my_divs = df_divs[mask]
+                        dividend_map = my_divs.groupby('ticker')['amount'].sum().to_dict()
+
+                    details_df = pd.DataFrame(st.session_state.stocks)
+                    if details_df.empty:
+                        details_df = pd.DataFrame(columns=["name", "full_name", "sector", "industry", "country", "currency", "current_value", "quantity", "average_price", "dividend_yield"])
                     
+                    # Ensure current_price exists (used as Invested Value in EUR for Stocks portfolio)
+                    if 'current_price' not in details_df.columns:
+                        details_df['current_price'] = 0.0
+
+                    # Helper to infer country and currency from ticker suffix (e.g., INTC.US -> (USA, USD))
+                    def infer_country_and_currency(ticker):
+                        if not isinstance(ticker, str) or not ticker:
+                            return "", ""
+                        parts = ticker.strip().split(".")
+                        if len(parts) < 2:
+                            return "USA", "USD"
+                        suffix = parts[-1].strip().upper()
+                        mapping = {
+                            "US": ("USA", "USD"),
+                            "DE": ("Germany", "EUR"),
+                            "DK": ("Denmark", "DKK"),
+                            "UK": ("United Kingdom", "GBP"),
+                            "GB": ("United Kingdom", "GBP"),
+                            "FR": ("France", "EUR"),
+                            "NL": ("Netherlands", "EUR"),
+                            "IT": ("Italy", "EUR"),
+                            "ES": ("Spain", "EUR"),
+                            "CA": ("Canada", "CAD"),
+                            "CH": ("Switzerland", "CHF"),
+                            "JP": ("Japan", "JPY"),
+                            "AU": ("Australia", "AUD"),
+                            "SE": ("Sweden", "SEK"),
+                            "NO": ("Norway", "NOK"),
+                            "FI": ("Finland", "EUR"),
+                            "BE": ("Belgium", "EUR"),
+                            "PT": ("Portugal", "EUR"),
+                            "IE": ("Ireland", "EUR"),
+                            "BR": ("Brazil", "BRL"),
+                            "CN": ("China", "CNY"),
+                            "HK": ("Hong Kong", "HKD"),
+                            "IN": ("India", "INR"),
+                        }
+                        return mapping.get(suffix, (suffix, "USD"))
+
+                    # Dynamically infer and populate country & currency from ticker
+                    if not details_df.empty and 'name' in details_df.columns:
+                        inferred = details_df['name'].apply(infer_country_and_currency)
+                        details_df['country'] = inferred.apply(lambda x: x[0])
+                        details_df['currency'] = inferred.apply(lambda x: x[1])
+
                     # Filtering only the requested columns and renaming
                     details_display_df = details_df[list(display_cols.keys())].rename(columns=display_cols)
 
-                    # Add Current % Calculation
+                    # Yield on Cost = Dividend Yield × (Market Value / Invested Value)
+                    # Both Market Value and Invested Value are in EUR — no currency mixing
+                    def calc_yoc(row):
+                        try:
+                            current_val = float(row.get('current_value', 0.0) or 0.0)
+                            invested = float(row.get('current_price', 0.0) or 0.0)
+                            div_yield = float(row.get('dividend_yield', 0.0) or 0.0)
+                            if invested <= 0:
+                                return 0.0
+                            return (div_yield / 100.0) * (current_val / invested) * 100.0
+                        except (ValueError, TypeError, ZeroDivisionError):
+                            return 0.0
+
+
+
+                    # Received Yield on Cost (%) = (Dividends Received / Invested Value) * 100
+                    def calc_received_yoc(row):
+                        try:
+                            ticker = row.get('name', '')
+                            divs = float(dividend_map.get(ticker, 0.0))
+                            invested = float(row.get('current_price', 0.0) or 0.0)
+                            if invested <= 0:
+                                return 0.0
+                            return (divs / invested) * 100.0
+                        except:
+                            return 0.0
+
+                    details_display_df['YoC (%)'] = details_df.apply(calc_yoc, axis=1)
+                    details_display_df['Received YoC (%)'] = details_df.apply(calc_received_yoc, axis=1)
+
+                    # Add Current % Calculation (read-only)
                     total_p_val = details_df['current_value'].sum()
                     details_display_df['Current %'] = (details_df['current_value'] / total_p_val * 100) if total_p_val > 0 else 0
-                    
-                    # Row-level formatting for Avg. Price (Strings with symbols)
-                    details_display_df['Avg. Price'] = details_df.apply(
-                        lambda x: f"{currency_symbols.get(x['currency'], '€')} {float(x.get('average_price', 0.0)):.2f}", 
-                        axis=1
-                    )
-                    
+
+                    # Explicitly reorder columns to place "Current %" before "Market Value"
+                    desired_order = [
+                        "Ticker", "Name", "Sector", "Industry", "Country", "Currency", 
+                        "Current %", "Market Value", "Invested Value (€)", "Quantity", 
+                        "Avg. Price", "Div. Yield (%)", "YoC (%)", "Received YoC (%)"
+                    ]
+                    col_order = [c for c in desired_order if c in details_display_df.columns]
+                    details_display_df = details_display_df[col_order]
+
                     # Freeze Ticker by setting as Index
                     details_display_df.set_index("Ticker", inplace=True)
-                    
+
                     detailed_config = {
-                        "Value": st.column_config.NumberColumn("Value (€)", format="€%.2f"),
-                        "Current %": st.column_config.NumberColumn("Current %", format="%.2f%%"),
+                        "Name": st.column_config.TextColumn("Name"),
+                        "Market Value": st.column_config.NumberColumn("Market Value (€)", min_value=0.0, step=0.01, format="€%.2f"),
+                        "Invested Value (€)": st.column_config.NumberColumn("Invested Value (€)", min_value=0.0, step=0.01, format="€%.2f"),
+                        "Current %": st.column_config.NumberColumn("Current %", format="%.2f%%", disabled=True),
                         "Quantity": st.column_config.NumberColumn("Quantity", format="%.2f"),
-                        "Avg. Price": st.column_config.TextColumn("Avg. Price"),
+                        "Avg. Price": st.column_config.NumberColumn("Avg. Price", min_value=0.0, step=0.01, format="%.2f"),
                         "Div. Yield (%)": st.column_config.NumberColumn("Div. Yield (%)", format="%.2f%%"),
+                        "Sector": st.column_config.TextColumn("Sector"),
+                        "Industry": st.column_config.TextColumn("Industry"),
+                        "Country": st.column_config.TextColumn("Country", disabled=True),
+                        "Currency": st.column_config.TextColumn("Currency", disabled=True),
+                        "YoC (%)": st.column_config.NumberColumn("YoC (%)", format="%.2f%%", disabled=True),
+                        "Received YoC (%)": st.column_config.NumberColumn("Received YoC (%)", format="%.2f%%", disabled=True),
                     }
                     
                     edited_details_df = st.data_editor(
@@ -2537,18 +2721,20 @@ elif authentication_status:
                             if ticker in current_stocks_map:
                                 updated_stock = current_stocks_map[ticker].copy()
                                 for col in updated_details.columns:
-                                    if col == 'average_price':
-                                        val_str = str(row[col]).replace(',', '.')
-                                        # Keep only digits, dots and minus
-                                        clean_val = ''.join(c for c in val_str if c.isdigit() or c in '.-')
-                                        if clean_val.count('.') > 1:
-                                            # Keep only the last dot
-                                            parts = clean_val.split('.')
-                                            clean_val = "".join(parts[:-1]) + "." + parts[-1]
+                                    if col in ('name', 'Current %', 'YoC (%)', 'Received YoC (%)'):
+                                        pass  # Skip computed/key columns
+                                    elif col == 'average_price':
+                                        # Save avg_price as plain float (native currency, independent)
                                         try:
-                                            updated_stock[col] = float(clean_val) if clean_val else 0.0
-                                        except:
-                                            updated_stock[col] = 0.0
+                                            updated_stock['average_price'] = float(row[col] or 0.0)
+                                        except (ValueError, TypeError):
+                                            pass
+                                    elif col == 'current_price':
+                                        # Save invested_value_eur directly, no cross-computation
+                                        try:
+                                            updated_stock['current_price'] = float(row[col] or 0.0)
+                                        except (ValueError, TypeError):
+                                            pass
                                     else:
                                         updated_stock[col] = row[col]
                                 new_stocks_list.append(updated_stock)
@@ -2556,7 +2742,8 @@ elif authentication_status:
                                 # New row added directly in editor
                                 new_stock = {
                                     "name": ticker,
-                                    "current_value": row.get('current_value', 0.0),
+                                    "current_value": float(row.get('current_value', 0.0) or 0.0),
+                                    "current_price": float(row.get('current_price', 0.0) or 0.0),
                                     "target_allocation": 0.0,
                                     "tolerance": 2.0,
                                     "expense_ratio": 0.0,
@@ -2565,21 +2752,10 @@ elif authentication_status:
                                     "industry": row.get('industry', ''),
                                     "country": row.get('country', ''),
                                     "currency": row.get('currency', 'EUR'),
-                                    "quantity": float(row.get('quantity', 0.0)),
-                                    "average_price": 0.0,
-                                    "dividend_yield": float(row.get('dividend_yield', 0.0))
+                                    "quantity": float(row.get('quantity', 0.0) or 0.0),
+                                    "average_price": float(row.get('average_price', 0.0) or 0.0),
+                                    "dividend_yield": float(row.get('dividend_yield', 0.0) or 0.0),
                                 }
-                                # Handle average_price string if set
-                                if 'average_price' in row:
-                                    val_str = str(row['average_price']).replace(',', '.')
-                                    clean_val = ''.join(c for c in val_str if c.isdigit() or c in '.-')
-                                    if clean_val.count('.') > 1:
-                                        parts = clean_val.split('.')
-                                        clean_val = "".join(parts[:-1]) + "." + parts[-1]
-                                    try:
-                                        new_stock['average_price'] = float(clean_val) if clean_val else 0.0
-                                    except:
-                                        new_stock['average_price'] = 0.0
                                 new_stocks_list.append(new_stock)
                         
                         if len(new_stocks_list) < len(st.session_state.stocks):
@@ -2634,6 +2810,7 @@ elif authentication_status:
                                     "portfolio_name": selected_portfolio,
                                     "stock_name": s['name'],
                                     "current_value": s['current_value'],
+                                    "current_price": float(s.get('current_price', 0.0) or 0.0),
                                     "target_allocation": s.get('target_allocation', 0.0),
                                     "tolerance": s.get('tolerance', 2.0),
                                     "expense_ratio": s.get('expense_ratio', 0.0),
@@ -2659,6 +2836,7 @@ elif authentication_status:
                                 "stock_name": "__PLACEHOLDER__",
                                 "current_value": 0.0,
                                 "target_allocation": 0.0,
+                                "current_price": 0.0,
                                 "portfolio_monthly_invest": portfolio_invest,
                                 "portfolio_use_indicators": portfolio_use_ind,
                                 "portfolio_buffett_index": portfolio_buffett,
@@ -2672,10 +2850,15 @@ elif authentication_status:
                         st.session_state.master_data = updated_data
                         conn.update(worksheet="Portfolios", data=updated_data)
                         
+                        st.session_state.editor_key += 1
                         st.session_state.has_unsaved_changes = False
-                        st.success("Changes saved successfully!")
+                        st.session_state.show_save_success = True
                         st.balloons()
                         st.rerun()
+
+                if st.session_state.get('show_save_success'):
+                    st.success("All changes saved successfully!")
+                    st.session_state.show_save_success = False
 
                 # Distribution Charts
                 with st.container(border=True):
@@ -2695,7 +2878,7 @@ elif authentication_status:
                         )
                         
                         # Use Tabs to provide massive horizontal workspace for Plotly leader lines
-                        dist_tab1, dist_tab2, dist_tab3, dist_tab4 = st.tabs(["📊 By Stock", "🏭 By Sector", "🏢 By Industry", "🌍 By Country"])
+                        dist_tab1, dist_tab2, dist_tab3, dist_tab4 = st.tabs(["📊 By Stock", "🏭 By Sector", "🏢 By Industry", "📍 By Country"])
                         
                         with dist_tab1:
                             # Current % (Asset Distribution)
@@ -2916,11 +3099,12 @@ elif authentication_status:
                                     # Sort for plotting: Year descending (Previous Year first in group usually depends on plotly, but keeping Month order is key)
                                     monthly_stats = monthly_stats.sort_values(['MonthNum', 'Year'])
                                     monthly_stats['amount'] = monthly_stats['amount'].round(2)
+                                    monthly_stats['text_label'] = monthly_stats['amount'].apply(lambda x: f"€{x:,.2f}" if x > 0 else "")
                                     
                                     st.markdown("#### 📊 Dividends Received (Yearly Comparison)")
-                                    fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='amount', color_discrete_sequence=CHART_PALETTE)
+                                    fig_div = px.bar(monthly_stats, x='Month', y='amount', color='Year', barmode='group', labels={'amount': 'Amount (€)', 'Month': 'Month'}, text='text_label', color_discrete_sequence=CHART_PALETTE)
                                     fig_div.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=10, r=10))
-                                    fig_div.update_traces(texttemplate='€%{y:.2f}', textposition='inside', textangle=-90, textfont_size=20)
+                                    fig_div.update_traces(textposition='auto', cliponaxis=False, textangle=-90, textfont_size=20, textfont=dict(color='white'))
                                     fig_div.update_layout(
                                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=16)),
                                         legend_title=dict(font=dict(size=16)),
@@ -2929,7 +3113,8 @@ elif authentication_status:
                                         yaxis=dict(title_font=dict(size=20), tickfont=dict(size=18)),
                                         margin=dict(t=10, b=50, l=10, r=10), 
                                         paper_bgcolor='rgba(0,0,0,0)', 
-                                        plot_bgcolor='rgba(0,0,0,0)'
+                                        plot_bgcolor='rgba(0,0,0,0)',
+                                        uniformtext=dict(mode='show', minsize=20)
                                     )
                                     st.plotly_chart(fig_div, use_container_width=True, config={'displayModeBar': False})
                                     with st.expander("Dividend History"):
