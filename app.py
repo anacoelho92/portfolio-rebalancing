@@ -2474,6 +2474,35 @@ elif authentication_status:
                         st.subheader("📋 Investment Recommendations")
                         df = st.session_state.last_calculation['df']
                         
+                        if p_type == "Growth & Dividends":
+                            growth_hedge_tickers = {"SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"}
+                            div_tickers = {"WTEQ.DE", "VDIV.DE", "JMT.PT", "EDP.PT"}
+                            
+                            total_growth_hedge = df[df['Stock'].isin(growth_hedge_tickers)]['Investment'].sum()
+                            total_dividends = df[df['Stock'].isin(div_tickers)]['Investment'].sum()
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown(
+                                    f"""
+                                    <div style="background-color: #2D2D3A; padding: 20px; border-radius: 12px; border-left: 6px solid #24A16F; margin-bottom: 20px;">
+                                        <span style="font-size: 1.1rem; font-weight: 600; color: #E5E7EB;">🌱 Total Growth & Hedge Investment</span><br>
+                                        <span style="font-size: 2.2rem; font-weight: 700; color: #24A16F;">€{total_growth_hedge:,.2f}</span>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+                            with col2:
+                                st.markdown(
+                                    f"""
+                                    <div style="background-color: #2D2D3A; padding: 20px; border-radius: 12px; border-left: 6px solid #2563EB; margin-bottom: 20px;">
+                                        <span style="font-size: 1.1rem; font-weight: 600; color: #E5E7EB;">💰 Total Dividends Investment</span><br>
+                                        <span style="font-size: 2.2rem; font-weight: 700; color: #2563EB;">€{total_dividends:,.2f}</span>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+                        
                         # Create a display-only version by dropping columns requested by user
                         display_df = df.drop(columns=["TER %", "Target Value"])
                         
