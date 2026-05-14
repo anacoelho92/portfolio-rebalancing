@@ -105,7 +105,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 3.0,
-            "PRAB.DE": 2.7,
+            "YCSH.DE": 2.7,
         }
 
     elif age < 45:
@@ -116,7 +116,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 4.0,
-            "PRAB.DE": 4.7,
+            "YCSH.DE": 4.7,
         }
 
     elif age < 50:
@@ -127,7 +127,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 5.0,
-            "PRAB.DE": 7.7,
+            "YCSH.DE": 7.7,
         }
 
     elif age < 55:
@@ -138,7 +138,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 6.0,
-            "PRAB.DE": 10.7,
+            "YCSH.DE": 10.7,
         }
 
     elif age < 60:
@@ -149,7 +149,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 8.0,
-            "PRAB.DE": 14.7,
+            "YCSH.DE": 14.7,
         }
 
     elif age < 65:
@@ -160,7 +160,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 10.0,
-            "PRAB.DE": 18.7,
+            "YCSH.DE": 18.7,
         }
 
     else:
@@ -171,7 +171,7 @@ def get_lifecycle_targets(age: int) -> Dict[str, float]:
             "JMT.PT": 1.0,
             "EDP.PT": 1.0,
             "EGLN.UK": 10.0,
-            "PRAB.DE": 25.7,
+            "YCSH.DE": 25.7,
         }
 
 
@@ -245,7 +245,7 @@ def calculate_portfolio_targets(age: int, buffett_index: float) -> Dict[str, Any
         "JMT.PT": lifecycle["JMT.PT"],
         "EDP.PT": lifecycle["EDP.PT"],
         "EGLN.UK": lifecycle["EGLN.UK"],
-        "PRAB.DE": lifecycle["PRAB.DE"],
+        "YCSH.DE": lifecycle["YCSH.DE"],
     }
 
     total = sum(targets.values())
@@ -272,7 +272,7 @@ TOLERANCE_PP = {
     "JMT.PT": 1.0,
     "EDP.PT": 1.0,
     "EGLN.UK": 1.0,
-    "PRAB.DE": 0.5,
+    "YCSH.DE": 0.5,
 }
 
 
@@ -357,10 +357,10 @@ def calculate_monthly_buys(
 
     if exclude_defensive:
         targets = targets.copy()
-        def_sum = targets.get("EGLN.UK", 0.0) + targets.get("PRAB.DE", 0.0)
+        def_sum = targets.get("EGLN.UK", 0.0) + targets.get("YCSH.DE", 0.0)
         remaining_sum = 100.0 - def_sum
         for asset in list(targets.keys()):
-            if asset in ("EGLN.UK", "PRAB.DE"):
+            if asset in ("EGLN.UK", "YCSH.DE"):
                 targets[asset] = 0.0
             elif remaining_sum > 0:
                 targets[asset] = (targets[asset] / remaining_sum) * 100.0
@@ -1188,7 +1188,7 @@ elif authentication_status:
             growth_tickers = {"SPYL.DE", "IXUA.DE", "VFEA.DE"}
             dividend_tickers = {"WTEQ.DE", "VDIV.DE", "EDP.PT", "JMT.PT"}
             gold_tickers = {"EGLN.UK", "EGNL.UK"}
-            bond_tickers = {"PRAB.DE", "IBTE.UK"}
+            bond_tickers = {"YCSH.DE", "PRAB.DE", "IBTE.UK"}
 
             def assign_global_label(row):
                 ticker = str(row['stock_name']).upper().strip()
@@ -1422,7 +1422,8 @@ elif authentication_status:
                 "EDP.PT": "EDP.PT",
                 "EGNL.UK": "EGLN.UK",
                 "EGLN.UK": "EGLN.UK",
-                "IBTE.UK": "PRAB.DE"
+                "IBTE.UK": "YCSH.DE",
+                "PRAB.DE": "YCSH.DE"
             }
             aggregated_holdings = {}
             for _, row in user_portfolio_df.iterrows():
@@ -1458,7 +1459,7 @@ elif authentication_status:
             current_stocks = list(aggregated_holdings.values())
             
             # Ensure all 9 target assets are present in the list
-            required_tickers = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "WTEQ.DE", "VDIV.DE", "JMT.PT", "EDP.PT", "EGLN.UK", "PRAB.DE"]
+            required_tickers = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "WTEQ.DE", "VDIV.DE", "JMT.PT", "EDP.PT", "EGLN.UK", "YCSH.DE"]
             existing_tickers = [s["name"] for s in current_stocks]
             for ticker in required_tickers:
                 if ticker not in existing_tickers:
@@ -1768,7 +1769,7 @@ elif authentication_status:
         live_stocks = copy.deepcopy(st.session_state.stocks) if 'stocks' in st.session_state else []
         
         # Custom sort order: PRAB and EGLN placed immediately after VFEA.DE
-        custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+        custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "YCSH.DE", "EGLN.UK"]
         live_stocks.sort(key=lambda x: custom_order_list.index(x.get('name', '')) if x.get('name', '') in custom_order_list else 99)
 
         # --- Top Row: KPI Cards ---
@@ -1891,7 +1892,7 @@ elif authentication_status:
 
 
                             # Custom order logic
-                            custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                            custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "YCSH.DE", "EGLN.UK"]
                             current_stocks_df['order_idx'] = current_stocks_df['name'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
                             current_stocks_df = current_stocks_df.sort_values(by='order_idx').drop(columns=['order_idx']).reset_index(drop=True)
                             current_stocks_df.set_index("name", inplace=True)
@@ -2121,11 +2122,11 @@ elif authentication_status:
                                 
                                 # Execute monthly buys logic with defensive transition plan
                                 try:
-                                    # Get dynamic target weights for EGLN.UK and PRAB.DE
+                                    # Get dynamic target weights for EGLN.UK and YCSH.DE
                                     targets_data = calculate_portfolio_targets(age, buffett_index)
                                     targets = targets_data["targets"]
                                     egln_tgt = targets.get("EGLN.UK", 3.0)
-                                    prab_tgt = targets.get("PRAB.DE", 2.7)
+                                    prab_tgt = targets.get("YCSH.DE", 2.7)
                                     
                                     total_port_val = sum(current_values.get(asset, 0.0) for asset in current_values)
                                     
@@ -2133,7 +2134,7 @@ elif authentication_status:
                                         portfolio_value=total_port_val,
                                         monthly_contribution=current_monthly_base,
                                         current_egln_value=current_values.get("EGLN.UK", 0.0),
-                                        current_prab_value=current_values.get("PRAB.DE", 0.0),
+                                        current_prab_value=current_values.get("YCSH.DE", 0.0),
                                         months=4,
                                         egln_target_pct=egln_tgt,
                                         prab_target_pct=prab_tgt,
@@ -2158,10 +2159,10 @@ elif authentication_status:
                                     
                                     # Integrate transition buys back into the final results
                                     buys_data["buys"]["EGLN.UK"] = egln_buy
-                                    buys_data["buys"]["PRAB.DE"] = prab_buy
+                                    buys_data["buys"]["YCSH.DE"] = prab_buy
                                     
                                     buys_data["raw_buys"]["EGLN.UK"] = egln_buy
-                                    buys_data["raw_buys"]["PRAB.DE"] = prab_buy
+                                    buys_data["raw_buys"]["YCSH.DE"] = prab_buy
                                     
                                     buys_data["portfolio_value_after"] = round(total_port_val + current_monthly_base, 2)
                                     buys_data["portfolio_targets"] = targets
@@ -2208,13 +2209,13 @@ elif authentication_status:
                                 st.session_state.vault_alloc_by_portfolio[selected_portfolio] = {
                                     "type": p_type,
                                     "EGLN.UK": buys_map.get("EGLN.UK", 0.0),
-                                    "PRAB.DE": buys_map.get("PRAB.DE", 0.0),
+                                    "YCSH.DE": buys_map.get("YCSH.DE", 0.0),
                                 }
                                 
                                 import pandas as pd
                                 alloc_df = pd.DataFrame(allocations)
                                 if not alloc_df.empty:
-                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "YCSH.DE", "EGLN.UK"]
                                     alloc_df['order_idx'] = alloc_df['Stock'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
                                     alloc_df = alloc_df.sort_values(by='order_idx').drop(columns=['order_idx'])
                                     
@@ -2445,7 +2446,7 @@ elif authentication_status:
                                 
                                 alloc_df = pd.DataFrame(allocations)
                                 if not alloc_df.empty:
-                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"]
+                                    custom_order_list = ["SPYL.DE", "IXUA.DE", "VFEA.DE", "YCSH.DE", "EGLN.UK"]
                                     alloc_df['order_idx'] = alloc_df['Stock'].apply(lambda x: custom_order_list.index(x) if x in custom_order_list else 99)
                                     alloc_df = alloc_df.sort_values(by='order_idx').drop(columns=['order_idx'])
 
@@ -2475,7 +2476,7 @@ elif authentication_status:
                         df = st.session_state.last_calculation['df']
                         
                         if p_type == "Growth & Dividends":
-                            growth_hedge_tickers = {"SPYL.DE", "IXUA.DE", "VFEA.DE", "PRAB.DE", "EGLN.UK"}
+                            growth_hedge_tickers = {"SPYL.DE", "IXUA.DE", "VFEA.DE", "YCSH.DE", "EGLN.UK"}
                             div_tickers = {"WTEQ.DE", "VDIV.DE", "JMT.PT", "EDP.PT"}
                             
                             total_growth_hedge = df[df['Stock'].isin(growth_hedge_tickers)]['Investment'].sum()
@@ -2568,7 +2569,7 @@ elif authentication_status:
                     # Charts Row
                     with st.container(border=True):
                         st.subheader("📉 Allocation Visuals")
-                        df_plot = df[~df['Stock'].isin(["EGLN.UK", "PRAB.DE"])].sort_values('Stock')
+                        df_plot = df[~df['Stock'].isin(["EGLN.UK", "YCSH.DE"])].sort_values('Stock')
                         
                         fig_after = px.pie(df_plot, values='New Value', names='Stock', hole=0.75, color_discrete_sequence=CHART_PALETTE)
                         fig_after.update_layout(
