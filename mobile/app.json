@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Portfolio Manager",
+    "slug": "portfolio-manager",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "portfoliomanager",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#1E1E2E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.portfolio.manager"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1E1E2E"
+      },
+      "package": "com.portfolio.manager"
+    },
+    "plugins": [
+      "expo-router",
+      "@react-native-community/datetimepicker"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:8000"
+    }
+  }
+}

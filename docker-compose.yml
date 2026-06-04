@@ -8,5 +8,22 @@ services:
     environment:
       - STREAMLIT_SERVER_PORT=8501
       - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_CREDENTIALS_JSON=${FIREBASE_CREDENTIALS_JSON}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+      - COOKIE_KEY=${COOKIE_KEY}
     restart: unless-stopped
     container_name: portfolio-calculator
+
+  portfolio-api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+      - COOKIE_KEY=${COOKIE_KEY}
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_CREDENTIALS_JSON=${FIREBASE_CREDENTIALS_JSON}
+    restart: unless-stopped
+    container_name: portfolio-api

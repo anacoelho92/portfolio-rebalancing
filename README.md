@@ -25,7 +25,7 @@ A comprehensive, multi-strategy wealth management platform built with **Streamli
 ## ✨ Key Features
 
 - **Premium UI/UX**: Dark-themed dashboard with sleek KPI cards for "Weighted TER", "Target Status", and "Strategic Gaps".
-- **GSheets Integration**: All portfolio data, market indicators, and dividend histories are persisted in Google Sheets for easy access and security.
+- **Firestore persistence**: Portfolio data, purchases, dividends, and investment history are stored in Firebase Firestore (see [FIREBASE.md](FIREBASE.md)).
 - **Interactive Management**: Use on-the-fly data editors to manage stocks, update current values, and manually override targets when necessary.
 - **Currency Support**: Automatic handling of multiple currencies (EUR, USD, GBP, etc.) with localized symbol mapping.
 - **Visual Analytics**: Dynamic Plotly charts showing "Current vs Target" distributions and "Before/After" rebalancing impact.
@@ -37,7 +37,7 @@ A comprehensive, multi-strategy wealth management platform built with **Streamli
 - **Frontend**: Streamlit
 - **Data Engine**: Pandas & NumPy
 - **Visuals**: Plotly (Pie Charts & Dashboards)
-- **Database**: Google Sheets (via `streamlit-gsheets`)
+- **Database**: Firebase Firestore (`api/sheets.py`)
 - **Environment**: Docker & Python 3.11+
 
 ---
@@ -45,21 +45,11 @@ A comprehensive, multi-strategy wealth management platform built with **Streamli
 ## ⚙️ Setup & Installation
 
 ### 1. Prerequisites
-- A Google Cloud project with Google Sheets API enabled.
-- A service account JSON key for authentication.
+- A Firebase / Google Cloud project with **Firestore** enabled.
+- A service account JSON key with Firestore access.
 
 ### 2. Environment Configuration
-Create a `.streamlit/secrets.toml` file or set environment variables:
-
-```toml
-[connections.gsheets]
-spreadsheet = "https://docs.google.com/spreadsheets/d/your-id"
-type = "service_account"
-project_id = "your-project-id"
-private_key = "-----BEGIN PRIVATE KEY-----\n..."
-client_email = "your-service-account@..."
-# Add other GSheets client fields...
-```
+Set `FIREBASE_PROJECT_ID` and `FIREBASE_CREDENTIALS_JSON`, or see [FIREBASE.md](FIREBASE.md) for `secrets.toml` and migration from Google Sheets.
 
 ### 3. Running with Docker (Recommended)
 ```bash

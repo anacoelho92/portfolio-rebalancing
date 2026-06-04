@@ -4,3 +4,6 @@ __pycache__/
 .DS_Store
 .env
 .streamlit/secrets.toml
+mobile/node_modules/
+mobile/.expo/
+expenseapp-df745-firebase-adminsdk-fbsvc-83455c8551.json
